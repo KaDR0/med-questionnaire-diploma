@@ -1,0 +1,18 @@
+<h2>{{ questionnaire.title }}</h2>
+<p><b>Пациент:</b> {{ patient.full_name }}</p>
+
+<form method="post">
+  {% csrf_token %}
+
+  {% for q in questions %}
+    <p>
+      <b>{{ q.order }}.</b> {{ q.text }}<br>
+      <label><input type="radio" name="{{ q.id }}" value="yes" required> Yes</label>
+      <label><input type="radio" name="{{ q.id }}" value="no"> No</label>
+    </p>
+  {% endfor %}
+
+  <button type="submit">Submit</button>
+</form>
+
+<a href="{% url 'start_assessment' patient.id %}">Назад</a>

@@ -1,0 +1,23 @@
+<h2>Результат обследования</h2>
+
+<p><b>Пациент:</b> {{ assessment.patient.full_name }}</p>
+<p><b>Опросник:</b> {{ assessment.questionnaire.title }}</p>
+<p><b>Баллы:</b> {{ assessment.total_score }}</p>
+<p><b>Заключение:</b> {{ assessment.conclusion }}</p>
+<p>
+  <a href="{% url 'assessment_pdf' assessment.id %}">
+    Скачать PDF отчёт
+  </a>
+</p>
+<hr>
+
+<h3>Ответы</h3>
+<ul>
+  {% for a in answers %}
+    <li>
+      {{ a.question.text }} — {{ a.value }} (балл: {{ a.score }})
+    </li>
+  {% endfor %}
+</ul>
+
+<a href="/">Назад</a>

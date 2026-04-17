@@ -1,0 +1,14 @@
+<h2>{{ patient.full_name }}</h2>
+<h3>Выберите опросник</h3>
+
+<ul>
+  {% for q in questionnaires %}
+    <li>
+      <a href="{% url 'questionnaire_view' patient.id q.id %}">{{ q.title }}</a>
+    </li>
+  {% empty %}
+    <li>Опросников нет</li>
+  {% endfor %}
+</ul>
+
+<a href="{% url 'patient_list' %}">Назад</a>

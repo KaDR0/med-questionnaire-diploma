@@ -1,0 +1,30 @@
+# Python / Django
+med-questionnaire/.venv/
+med-questionnaire/**/__pycache__/
+*.py[cod]
+*.sqlite3
+med-questionnaire/db.sqlite3
+*.egg-info/
+.eggs/
+
+# Секреты — не коммитить
+med-questionnaire/firebase-service-account.json
+.env
+.env.*
+!.env.example
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+
+# Логи и локальные файлы
+*.log
+npm-debug.log*
+
+# IDE / ОС
+.idea/
+.vscode/
+!.vscode/extensions.json
+.DS_Store
+*.swp
+Thumbs.db

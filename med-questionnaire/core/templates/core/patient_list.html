@@ -1,0 +1,56 @@
+<h2>Импорт пациентов из Excel</h2>
+
+{% if messages %}
+  {% for message in messages %}
+    <p>{{ message }}</p>
+  {% endfor %}
+{% endif %}
+
+<form method="post" action="{% url 'import_patients_excel' %}" enctype="multipart/form-data">
+  {% csrf_token %}
+  <input type="file" name="file" accept=".xlsx" required>
+  <button type="submit">Импорт пациентов</button>
+</form>
+
+<hr>
+
+<h2>Поиск пациента по Patient ID</h2>
+
+<form method="get" style="margin-bottom: 15px;">
+  <input type="text" name="q" value="{{ query }}" placeholder="Введите Patient ID">
+  <button type="submit">Найти</button>
+</form>
+
+<hr>
+
+<h2>Patients</h2>
+
+<ul>
+  {% for p in patients %}
+    <li>
+      <b>{{ p.full_name }}</b>
+      {% if p.patient_code %}(ID: {{ p.patient_code }}){% endif %}
+
+      <a href="{% url 'patient_detail' p.id %}">Открыть</a>
+      <a href="{% url 'start_assessment' p.id %}">Опрос</a>
+      <a href="{% url 'export_lab_template' %}">Шаблон анализов</a>
+
+      <form method="post" action="{% url 'delete_patient' p.id %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" onclick="return confirm('Удалить пациента?')">Удалить</button>
+      </form>
+    </li>
+  {% empty %}
+    <li>Пациентов нет</li>
+  {% endfor %}
+</ul>
+
+<hr>
+
+<h2>Импорт анализов из Excel</h2>
+
+<form method="post" action="{% url 'import_lab_excel' %}" enctype="multipart/form-data">
+  {% csrf_token %}
+  <input type="file" name="file" accept=".xlsx" required>
+  <button type="submit">Загрузить</button>
+</form>

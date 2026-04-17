@@ -1,0 +1,251 @@
+<div style="margin-bottom: 15px;">
+  <a href="{% url 'patient_list' %}">🏠 Главная</a>
+  <a href="{% url 'start_assessment' patient.id %}" style="margin-left: 10px;">📝 Опрос</a>
+</div>
+
+<hr>
+<hr>
+{% load tz %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  .history-table { border-collapse: collapse; }
+  .history-table th, .history-table td {
+    border: 1px solid #333;
+    padding: 6px 10px;
+  }
+
+  .note-box {
+    border: 1px solid #ccc;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+</style>
+
+<h2>{{ patient.full_name }}</h2>
+
+<p><b>Patient ID:</b> {{ patient.patient_code }}</p>
+<p><b>Возраст:</b> {{ patient.age }}</p>
+<p><b>Пол (1-м,2-ж):</b> {{ patient.sex }}</p>
+<p><b>Рост:</b> {{ patient.height_cm }}</p>
+<p><b>Вес:</b> {{ patient.weight_kg }}</p>
+
+<a href="{% url 'patient_list' %}">Назад</a>
+
+<p>
+  <a href="{% url 'patient_pdf_all' patient.id %}">
+    Скачать ВСЕ обследования PDF
+  </a>
+</p>
+
+<hr>
+
+<h3>Заметки врача</h3>
+
+<form method="post" action="{% url 'add_patient_note' patient.id %}">
+  {% csrf_token %}
+  <textarea name="text" rows="5" cols="80" placeholder="Введите заметку врача..." required></textarea><br>
+  <button type="submit">Сохранить заметку</button>
+</form>
+
+<br>
+
+{% if notes %}
+  {% for note in notes %}
+    <div class="note-box">
+      <p>
+        <b>Дата:</b> {{ note.created_at|localtime|date:"d.m.Y H:i" }}
+        {% if note.doctor %}
+          | <b>Врач:</b> {{ note.doctor.username }}
+        {% endif %}
+      </p>
+
+      <p>{{ note.text|linebreaks }}</p>
+
+      {% if note.doctor == user %}
+        <a href="{% url 'edit_note' note.id %}">✏️ Редактировать</a>
+
+        <form method="post" action="{% url 'delete_note' note.id %}" style="display:inline;">
+          {% csrf_token %}
+          <button type="submit" onclick="return confirm('Удалить заметку?')">
+            🗑 Удалить
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <p>Заметок пока нет</p>
+{% endif %}
+
+<hr>
+
+<h3>Все данные из Excel</h3>
+<ul>
+  {% for key, value in patient.data.items %}
+    <li><b>{{ key }}:</b> {{ value }}</li>
+  {% endfor %}
+</ul>
+
+<hr>
+
+<h3>История обследований</h3>
+
+{% if history %}
+<table class="history-table">
+  <tr>
+    <th>Дата</th>
+    <th>Опросник</th>
+    <th>Баллы</th>
+    <th>Заключение</th>
+    <th></th>
+  </tr>
+
+  {% for h in history %}
+  <tr>
+    <td>{{ h.created_at|localtime|date:"d.m.Y H:i" }}</td>
+    <td>{{ h.questionnaire.title }}</td>
+    <td>{{ h.total_score }}</td>
+    <td>{{ h.conclusion }}</td>
+    <td>
+      <a href="{% url 'assessment_result' h.id %}">Открыть</a>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+  <p>Обследований пока нет</p>
+{% endif %}
+
+<hr>
+
+<h3>Динамика баллов (по дате и времени)</h3>
+
+<canvas id="scoreChart" height="120"></canvas>
+
+<script>
+  const labels = {{ labels_json }};
+  const scores = {{ scores_json }};
+
+  const ctx = document.getElementById('scoreChart');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Баллы',
+        data: scores,
+        borderWidth: 2,
+        tension: 0.3
+      }]
+    },
+    options: {
+      plugins: { legend: { display: true } },
+      scales: {
+        x: { ticks: { maxRotation: 45, minRotation: 45 } },
+        y: { beginAtZero: true }
+      }
+    }
+  });
+</script>
+
+<hr>
+
+<h3>Анализы (из импортированного Excel)</h3>
+
+{% if lab_results %}
+  {% for r in lab_results %}
+    <h4>Дата: {{ r.date|date:"d.m.Y" }}</h4>
+    <ul>
+      {% for v in r.values.all %}
+        <li>
+          <b>{{ v.indicator.name }}</b>: {{ v.value }}
+          {% if v.indicator.unit %}{{ v.indicator.unit }}{% endif %}
+
+          {% if v.indicator.min_norm or v.indicator.max_norm %}
+            | Норма:
+            {{ v.indicator.min_norm|default:"?" }} – {{ v.indicator.max_norm|default:"?" }}
+          {% endif %}
+
+          {% if v.status == "low" %}
+            <span style="color: orange; font-weight: bold;">({{ v.status_text }})</span>
+          {% elif v.status == "high" %}
+            <span style="color: red; font-weight: bold;">({{ v.status_text }})</span>
+          {% else %}
+            <span style="color: green; font-weight: bold;">({{ v.status_text }})</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endfor %}
+{% else %}
+  <p>Анализов пока нет</p>
+{% endif %}
+
+<hr>
+
+<form method="get" style="margin-bottom: 15px;">
+  <label><b>Фильтр по анализу:</b></label>
+
+  <select name="analysis">
+    <option value="">Все анализы</option>
+
+    {% for a in available_analyses %}
+      <option value="{{ a }}" {% if a == selected_analysis %}selected{% endif %}>
+        {{ a }}
+      </option>
+    {% endfor %}
+  </select>
+
+  <button type="submit">Показать</button>
+</form>
+
+<h3>Графики анализов</h3>
+
+<div id="labCharts"></div>
+
+<script>
+const labCharts = {{ lab_charts_json|safe }};
+const container = document.getElementById("labCharts");
+
+Object.keys(labCharts).forEach(name => {
+    const chartId = "chart_" + name.replace(/\s+/g, "_");
+
+    const title = document.createElement("h4");
+    title.innerText = name;
+    container.appendChild(title);
+
+    const canvas = document.createElement("canvas");
+    canvas.id = chartId;
+    canvas.height = 120;
+    container.appendChild(canvas);
+
+    new Chart(canvas, {
+        type: "line",
+        data: {
+            labels: labCharts[name].labels,
+            datasets: [{
+                label: name,
+                data: labCharts[name].values,
+                borderWidth: 2,
+                tension: 0.3
+            }]
+        },
+        options: {
+            plugins: {
+                legend: { display: true }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false
+                }
+            }
+        }
+    });
+});
+</script>
+
+<hr>
+<a href="{% url 'patient_list' %}" style="display:inline-block; margin-top:10px;">
+  ← Назад к списку пациентов
+</a>

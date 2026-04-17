@@ -1,0 +1,15 @@
+<h2>Редактирование заметки</h2>
+
+<form method="post">
+  {% csrf_token %}
+
+  <textarea name="text" rows="6" cols="80">{{ note.text }}</textarea>
+
+  <br><br>
+
+  <button type="submit">Сохранить</button>
+</form>
+
+<br>
+
+<a href="{% url 'patient_detail' note.patient.id %}">← Назад</a>
