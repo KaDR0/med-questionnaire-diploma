@@ -15,6 +15,7 @@ from .models import (
     PatientRiskProfile,
     RiskFinding,
     RiskRedFlag,
+    QuestionnaireSession,
 )
 
 
@@ -29,15 +30,124 @@ class PatientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Patient
         fields = "__all__"
+        extra_kwargs = {
+            "patient_code": {"validators": []},
+        }
+
+    def validate_patient_code(self, value):
+        patient_code = (value or "").strip()
+        if not patient_code:
+            return value
+        queryset = Patient.objects.filter(patient_code=patient_code)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("Пациент с таким ID уже существует.")
+        return patient_code
 
 
 class QuestionnaireSerializer(serializers.ModelSerializer):
     disease_name = serializers.CharField(source="disease.name", read_only=True)
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    questions = serializers.SerializerMethodField()
+
+    def get_questions(self, obj):
+        return QuestionSerializer(obj.questions.all().order_by("order"), many=True).data
 
     class Meta:
         model = Questionnaire
         fields = '__all__'
+        read_only_fields = ["approved_by", "approved_at", "created_by"]
+
+
+class QuestionWriteSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+
+    class Meta:
+        model = Question
+        fields = [
+            "id",
+            "order",
+            "text",
+            "text_en",
+            "text_ru",
+            "text_kk",
+            "qtype",
+            "is_required",
+            "options",
+            "score_yes",
+            "score_no",
+            "feature_key",
+            "red_flag_level",
+            "red_flag_message",
+        ]
+
+    def validate(self, attrs):
+        qtype = attrs.get("qtype", getattr(self.instance, "qtype", Question.YESNO))
+        options = attrs.get("options", getattr(self.instance, "options", []))
+        if qtype == Question.SINGLE_CHOICE:
+            if not isinstance(options, list) or len(options) < 2:
+                raise serializers.ValidationError({"options": "Single choice question must have at least 2 options."})
+            for option in options:
+                if "text" not in option:
+                    raise serializers.ValidationError({"options": "Each option must contain text."})
+                try:
+                    int(option.get("score", 0))
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError({"options": "Option score must be a number."})
+        return attrs
+
+
+class QuestionnaireWriteSerializer(serializers.ModelSerializer):
+    questions = QuestionWriteSerializer(many=True)
+
+    class Meta:
+        model = Questionnaire
+        fields = "__all__"
+        read_only_fields = ["approved_by", "approved_at", "created_by", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        title = (attrs.get("title") or "").strip()
+        if not title:
+            raise serializers.ValidationError({"title": "Title is required."})
+        questions = attrs.get("questions", [])
+        if not questions:
+            raise serializers.ValidationError({"questions": "At least one question is required."})
+        if attrs.get("is_standardized"):
+            if not (attrs.get("source_name") or "").strip():
+                raise serializers.ValidationError({"source_name": "Source name is required for standardized questionnaires."})
+            if not (attrs.get("source_url") or "").strip():
+                raise serializers.ValidationError({"source_url": "Source URL is required for standardized questionnaires."})
+        return attrs
+
+    def create(self, validated_data):
+        questions_data = validated_data.pop("questions", [])
+        questionnaire = Questionnaire.objects.create(**validated_data)
+        for question_data in questions_data:
+            Question.objects.create(questionnaire=questionnaire, **question_data)
+        return questionnaire
+
+    def update(self, instance, validated_data):
+        questions_data = validated_data.pop("questions", None)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.save()
+        if questions_data is not None:
+            existing_questions = {question.id: question for question in instance.questions.all()}
+            kept_ids = set()
+            for question_data in questions_data:
+                question_id = question_data.pop("id", None)
+                if question_id and question_id in existing_questions:
+                    question = existing_questions[question_id]
+                    for key, value in question_data.items():
+                        setattr(question, key, value)
+                    question.save()
+                    kept_ids.add(question.id)
+                else:
+                    question = Question.objects.create(questionnaire=instance, **question_data)
+                    kept_ids.add(question.id)
+            instance.questions.exclude(id__in=kept_ids).delete()
+        return instance
 
 
 class QuestionSerializer(serializers.ModelSerializer):
@@ -260,4 +370,21 @@ class PatientRiskProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PatientRiskProfile
+        fields = "__all__"
+
+
+class QuestionnaireSessionCreateSerializer(serializers.Serializer):
+    patient_id = serializers.IntegerField()
+    questionnaire_id = serializers.IntegerField()
+
+
+class QuestionnaireSessionSerializer(serializers.ModelSerializer):
+    questionnaire_title = serializers.SerializerMethodField()
+
+    def get_questionnaire_title(self, obj):
+        questionnaire = obj.questionnaire
+        return questionnaire.title_en or questionnaire.title_ru or questionnaire.title_kk or questionnaire.title
+
+    class Meta:
+        model = QuestionnaireSession
         fields = "__all__"

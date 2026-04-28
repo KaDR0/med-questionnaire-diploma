@@ -1,15 +1,16 @@
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.db.utils import OperationalError, ProgrammingError
 
-from .firebase_auth import verify_firebase_token
 from .models import DoctorProfile
+from .permissions import get_user_role
 
 
 def _get_photo_data_url(user):
@@ -22,38 +23,49 @@ def _get_photo_data_url(user):
 
 
 class SignupAPIView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
-        username = request.data.get("username", "").strip()
         email = request.data.get("email", "").strip()
         password = request.data.get("password", "")
+        full_name = request.data.get("full_name", "").strip()
+        role = request.data.get("role", DoctorProfile.ROLE_DOCTOR)
         first_name = request.data.get("first_name", "").strip()
         last_name = request.data.get("last_name", "").strip()
+        if full_name and (not first_name and not last_name):
+            parts = full_name.split(" ", 1)
+            first_name = parts[0]
+            if len(parts) > 1:
+                last_name = parts[1]
 
-        if not username or not password:
+        if not email or not password:
             return Response(
-                {"error": "username and password are required"},
+                {"error": "email and password are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if User.objects.filter(username=username).exists():
-            return Response(
-                {"error": "Username already exists"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if email and User.objects.filter(email=email).exists():
+        if User.objects.filter(email=email).exists():
             return Response(
                 {"error": "Email already exists"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            first_name=first_name,
-            last_name=last_name,
-        )
+        username_base = email.split("@")[0] or "user"
+        username = username_base
+        counter = 1
+        while User.objects.filter(username=username).exists():
+            username = f"{username_base}{counter}"
+            counter += 1
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+            )
+            DoctorProfile.objects.get_or_create(user=user, defaults={"role": role})
 
         refresh = RefreshToken.for_user(user)
 
@@ -64,10 +76,11 @@ class SignupAPIView(APIView):
                 "refresh": str(refresh),
                 "user": {
                     "id": user.id,
-                    "username": user.username,
                     "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
+                    "full_name": f"{user.first_name} {user.last_name}".strip() or user.username,
+                    "role": get_user_role(user),
+                    "is_active": user.is_active,
+                    "created_at": user.date_joined,
                     "photo_data_url": _get_photo_data_url(user),
                 },
             },
@@ -76,8 +89,10 @@ class SignupAPIView(APIView):
 
 
 class LoginAPIView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
-        login_value = request.data.get("username", "").strip()
+        login_value = request.data.get("email", "").strip() or request.data.get("username", "").strip()
         password = request.data.get("password", "")
 
         if not login_value or not password:
@@ -111,10 +126,11 @@ class LoginAPIView(APIView):
                 "refresh": str(refresh),
                 "user": {
                     "id": user.id,
-                    "username": user.username,
                     "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
+                    "full_name": f"{user.first_name} {user.last_name}".strip() or user.username,
+                    "role": get_user_role(user),
+                    "is_active": user.is_active,
+                    "created_at": user.date_joined,
                     "photo_data_url": _get_photo_data_url(user),
                 },
             },
@@ -122,89 +138,23 @@ class LoginAPIView(APIView):
         )
 
 
-class FirebaseLoginAPIView(APIView):
+class LogoutAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
-        id_token = request.data.get("id_token")
-
-        if not id_token:
-            return Response(
-                {"error": "id_token is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            decoded = verify_firebase_token(id_token)
-        except Exception as e:
+            refresh_token = request.data.get("refresh")
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+        except Exception:
             return Response(
-                {"error": f"Invalid Firebase token: {str(e)}"},
-                status=status.HTTP_401_UNAUTHORIZED,
+                {"detail": "Logout completed locally. Token blacklist is not enabled."},
+                status=status.HTTP_200_OK,
             )
 
-        email = decoded.get("email", "")
-        uid = decoded.get("uid")
-        name = decoded.get("name", "")
-
-        if not email:
-            return Response(
-                {"error": "Firebase token does not contain email"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        first_name = ""
-        last_name = ""
-
-        if name:
-            parts = name.strip().split(" ", 1)
-            first_name = parts[0]
-            if len(parts) > 1:
-                last_name = parts[1]
-
-        username_base = email.split("@")[0]
-        username = username_base
-
-        user = User.objects.filter(email=email).first()
-
-        if not user:
-            counter = 1
-            while User.objects.filter(username=username).exists():
-                username = f"{username_base}{counter}"
-                counter += 1
-
-            temp_password = "firebase_temp_password_123"
-
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=temp_password,
-                first_name=first_name,
-                last_name=last_name,
-            )
-        else:
-            updated = False
-            if first_name and user.first_name != first_name:
-                user.first_name = first_name
-                updated = True
-            if last_name and user.last_name != last_name:
-                user.last_name = last_name
-                updated = True
-            if updated:
-                user.save()
-
-        return Response(
-            {
-                "message": "Firebase login successful",
-                "firebase_uid": uid,
-                "user": {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "photo_data_url": _get_photo_data_url(user),
-                },
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response({"detail": "Logged out"}, status=status.HTTP_200_OK)
 
 
 class MeAPIView(APIView):
@@ -216,16 +166,20 @@ class MeAPIView(APIView):
         return Response(
             {
                 "id": user.id,
-                "username": user.username,
                 "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
+                "full_name": f"{user.first_name} {user.last_name}".strip() or user.username,
+                "role": get_user_role(user),
+                "is_active": user.is_active,
+                "created_at": user.date_joined,
                 "photo_data_url": _get_photo_data_url(user),
             }
         )
 
 
 class DoctorProfilePhotoAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def patch(self, request):
         photo_data_url = request.data.get("photo_data_url", "")
         if photo_data_url and not str(photo_data_url).startswith("data:image/"):

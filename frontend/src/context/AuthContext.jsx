@@ -1,96 +1,88 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import {
-  onAuthStateChanged,
-  signOut,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-  getIdToken,
-} from "firebase/auth";
-import { auth } from "../firebase";
-import api from "../api/axios";
+import api, { clearStoredTokens, getStoredTokens, setAuthHandlers, storeTokens } from "../api/axios";
 
 const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-  const [firebaseUser, setFirebaseUser] = useState(null);
-  const [backendUser, setBackendUser] = useState(null);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const syncUserWithBackend = async (user) => {
-    const idToken = await getIdToken(user);
-
-    const response = await api.post("auth/firebase-login/", {
-      id_token: idToken,
+  useEffect(() => {
+    setAuthHandlers({
+      handleLogout: () => {
+        setUser(null);
+      },
+      handleTokenRefresh: () => {},
     });
+    return () => setAuthHandlers({ handleLogout: null, handleTokenRefresh: null });
+  }, []);
 
-    setBackendUser(response.data.user);
-    return response.data.user;
+  const fetchMe = async () => {
+    const meResponse = await api.get("auth/me/");
+    setUser(meResponse.data);
+    return meResponse.data;
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const bootstrap = async () => {
       try {
-        if (!user) {
-          setFirebaseUser(null);
-          setBackendUser(null);
+        const { access, refresh } = getStoredTokens();
+        if (!access && !refresh) {
           setLoading(false);
           return;
         }
-
-        setFirebaseUser(user);
-        await syncUserWithBackend(user);
+        if (!access && refresh) {
+          const refreshResponse = await api.post("auth/token/refresh/", { refresh });
+          storeTokens({ access: refreshResponse.data.access });
+        }
+        await fetchMe();
       } catch (error) {
-        console.error("Auth sync error:", error);
-        setFirebaseUser(null);
-        setBackendUser(null);
+        clearStoredTokens();
+        setUser(null);
       } finally {
         setLoading(false);
       }
-    });
-
-    return () => unsubscribe();
+    };
+    bootstrap();
   }, []);
 
   const login = async (email, password) => {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    await syncUserWithBackend(result.user);
+    const response = await api.post("auth/login/", { email, password });
+    storeTokens({ access: response.data.access, refresh: response.data.refresh });
+    setUser(response.data.user);
   };
 
-  const signup = async ({ email, password, first_name, last_name }) => {
-    const result = await createUserWithEmailAndPassword(auth, email, password);
-
-    const fullName = `${first_name || ""} ${last_name || ""}`.trim();
-
-    if (fullName) {
-      await updateProfile(result.user, {
-        displayName: fullName,
-      });
-    }
-
-    await syncUserWithBackend(result.user);
-
-    return {
-      message: "SIGNUP_SUCCESS",
-    };
+  const signup = async ({ email, password, first_name, last_name, role }) => {
+    const full_name = `${first_name || ""} ${last_name || ""}`.trim();
+    const response = await api.post("auth/register/", { email, password, full_name, first_name, last_name, role });
+    storeTokens({ access: response.data.access, refresh: response.data.refresh });
+    setUser(response.data.user);
+    return { message: "SIGNUP_SUCCESS" };
   };
 
   const logout = async () => {
-    await signOut(auth);
-    setFirebaseUser(null);
-    setBackendUser(null);
+    try {
+      const { refresh } = getStoredTokens();
+      if (refresh) {
+        await api.post("auth/logout/", { refresh });
+      }
+    } catch (_e) {
+      // Ignore logout network errors, local cleanup is still required.
+    } finally {
+      clearStoredTokens();
+      setUser(null);
+    }
   };
 
   return (
     <AuthContext.Provider
       value={{
-        user: backendUser,
-        firebaseUser,
+        user,
         loading,
         login,
         signup,
         logout,
-        isAuthenticated: !!firebaseUser && !!backendUser,
+        isAuthenticated: !!user,
       }}
     >
       {children}

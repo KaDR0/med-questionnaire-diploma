@@ -73,6 +73,7 @@ function PatientDetailPage() {
   });
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [savingPatient, setSavingPatient] = useState(false);
   const [noteSubmitting, setNoteSubmitting] = useState(false);
   const [savingLabResult, setSavingLabResult] = useState(false);
@@ -209,6 +210,10 @@ function PatientDetailPage() {
     loadPatientData()
       .catch((error) => {
         console.error("Error loading patient data:", error);
+        if ([403, 404].includes(error?.response?.status)) {
+          setAccessDenied(true);
+          return;
+        }
         showFeedback(t("detail.loadError"), "error");
       })
       .finally(() => {
@@ -905,7 +910,7 @@ function PatientDetailPage() {
   if (!patient) {
     return (
       <Box sx={{ py: 2 }}>
-        <Typography>{t("detail.notFound")}</Typography>
+        <Typography>{accessDenied ? t("detail.accessDenied") : t("detail.notFound")}</Typography>
       </Box>
     );
   }

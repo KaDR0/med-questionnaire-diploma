@@ -9,6 +9,7 @@ import {
   TextField,
   Typography,
   Alert,
+  MenuItem,
 } from "@mui/material";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "react-i18next";
@@ -24,6 +25,7 @@ function SignupPage() {
     password: "",
     first_name: "",
     last_name: "",
+    role: "doctor",
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -38,18 +40,18 @@ function SignupPage() {
   const validatePassword = (password) => {
     const hasCyrillic = /[А-Яа-яЁёӘәІіҢңҒғҮүҰұҚқӨөҺһ]/.test(password);
     if (hasCyrillic) {
-      return "Пароль не должен содержать кириллицу.";
+      return t("signup.passwordRules.noCyrillic");
     }
 
     if (password.length < 8) {
-      return "Пароль должен содержать минимум 8 символов.";
+      return t("signup.passwordRules.minLength");
     }
 
     const hasLetter = /[A-Za-z]/.test(password);
     const hasDigit = /\d/.test(password);
 
     if (!hasLetter || !hasDigit) {
-      return "Пароль должен содержать хотя бы одну букву и одну цифру.";
+      return t("signup.passwordRules.letterAndDigit");
     }
 
     return "";
@@ -69,7 +71,7 @@ function SignupPage() {
       await signup(form);
 
       setSuccess(
-        "Аккаунт создан. Мы отправили письмо на вашу почту. Подтвердите email, затем войдите."
+        t("signup.success")
       );
 
       setTimeout(() => {
@@ -82,7 +84,7 @@ function SignupPage() {
         err?.code ||
         err?.response?.data?.error ||
         err?.message ||
-        "Signup failed";
+        t("signup.error");
 
       setError(message);
     }
@@ -137,7 +139,7 @@ function SignupPage() {
 
             <TextField
               fullWidth
-              label="Email"
+              label={t("signup.email")}
               sx={{ mb: 2 }}
               value={form.email}
               onChange={(e) => handleChange("email", e.target.value)}
@@ -153,8 +155,20 @@ function SignupPage() {
             />
 
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Минимум 8 символов, хотя бы одна буква и одна цифра, без кириллицы.
+              {t("signup.passwordHint")}
             </Typography>
+            <TextField
+              select
+              fullWidth
+              label={t("signup.role")}
+              sx={{ mb: 3 }}
+              value={form.role}
+              onChange={(e) => handleChange("role", e.target.value)}
+            >
+              <MenuItem value="doctor">{t("signup.roles.doctor")}</MenuItem>
+              <MenuItem value="chief_doctor">{t("signup.roles.chiefDoctor")}</MenuItem>
+              <MenuItem value="admin">{t("signup.roles.admin")}</MenuItem>
+            </TextField>
 
             <Button variant="contained" fullWidth onClick={handleSubmit} sx={{ mb: 2 }}>
               {t("signup.button")}

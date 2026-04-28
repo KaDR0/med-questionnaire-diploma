@@ -28,3 +28,17 @@ npm-debug.log*
 .DS_Store
 *.swp
 Thumbs.db
+# Local env
+.env
+frontend/.env
+med-questionnaire/.env
+
+# Screenshots
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Local/private folders
+Анализы и Пациенты/
+

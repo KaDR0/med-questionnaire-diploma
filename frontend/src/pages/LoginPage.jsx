@@ -48,7 +48,7 @@ function LoginPage() {
         err?.response?.data?.message ||
         err?.message ||
         err?.code ||
-        "Login failed";
+        t("login.error");
 
       setError(message);
     } finally {
@@ -88,7 +88,7 @@ function LoginPage() {
 
             <TextField
               fullWidth
-              label="Email"
+              label={t("signup.email")}
               sx={{ mb: 2 }}
               value={form.email}
               onChange={(e) => handleChange("email", e.target.value)}

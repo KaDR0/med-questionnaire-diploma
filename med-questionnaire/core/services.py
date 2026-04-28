@@ -51,6 +51,15 @@ def _calculate_answer_score(question, value):
             return question.score_yes
         if normalized_value.lower() == "no":
             return question.score_no
+    elif question.qtype == Question.SINGLE_CHOICE:
+        for option in question.options or []:
+            option_value = str(option.get("value", "")).strip()
+            option_label = str(option.get("text", "")).strip()
+            if normalized_value == option_value or normalized_value == option_label:
+                try:
+                    return int(option.get("score", 0))
+                except (TypeError, ValueError):
+                    return 0
 
     return 0
 
@@ -140,6 +149,15 @@ def calculate_and_save_assessment(patient, questionnaire, answers, doctor=None):
 
         if question.qtype == Question.YESNO:
             max_score += max(question.score_yes, question.score_no)
+        elif question.qtype == Question.SINGLE_CHOICE:
+            options = question.options or []
+            max_option_score = 0
+            for option in options:
+                try:
+                    max_option_score = max(max_option_score, int(option.get("score", 0)))
+                except (TypeError, ValueError):
+                    continue
+            max_score += max_option_score
 
         Answer.objects.create(
             assessment=assessment,

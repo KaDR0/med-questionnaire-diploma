@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
+from django.utils import timezone
 
 
 class Disease(models.Model):
@@ -42,7 +43,38 @@ class Questionnaire(models.Model):
     target_condition_code = models.CharField(max_length=64, blank=True, default="")
     interpretation_schema = models.JSONField(default=dict, blank=True)
     min_completion_percent = models.PositiveSmallIntegerField(default=70)
+    source_name = models.CharField(max_length=255, blank=True, default="")
+    source_url = models.URLField(blank=True, default="")
+    source_type = models.CharField(max_length=100, blank=True, default="")
+    medical_area = models.CharField(max_length=120, blank=True, default="")
+    risk_target = models.CharField(max_length=255, blank=True, default="")
+    scoring_method = models.TextField(blank=True, default="")
+    interpretation_rules = models.TextField(blank=True, default="")
+    evidence_note = models.TextField(blank=True, default="")
+    is_standardized = models.BooleanField(default=False)
+    APPROVAL_DRAFT = "draft"
+    APPROVAL_PENDING = "pending_approval"
+    APPROVAL_APPROVED = "approved"
+    APPROVAL_REJECTED = "rejected"
+    APPROVAL_CHANGES = "changes_requested"
+    APPROVAL_CHOICES = [
+        (APPROVAL_DRAFT, "Draft"),
+        (APPROVAL_PENDING, "Pending approval"),
+        (APPROVAL_APPROVED, "Approved"),
+        (APPROVAL_REJECTED, "Rejected"),
+        (APPROVAL_CHANGES, "Changes requested"),
+    ]
+    approval_status = models.CharField(max_length=32, choices=APPROVAL_CHOICES, default=APPROVAL_DRAFT)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_questionnaires"
+    )
+    approved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_questionnaires"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    review_comment = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         display_title = self.title_en or self.title_ru or self.title_kk or self.title
@@ -51,11 +83,13 @@ class Questionnaire(models.Model):
 
 class Question(models.Model):
     YESNO = "yesno"
+    SINGLE_CHOICE = "single_choice"
     NUMBER = "number"
     TEXT = "text"
 
     QUESTION_TYPES = [
         (YESNO, "Yes/No"),
+        (SINGLE_CHOICE, "Single choice"),
         (NUMBER, "Number"),
         (TEXT, "Text"),
     ]
@@ -69,6 +103,8 @@ class Question(models.Model):
     text_kk = models.CharField(max_length=500, blank=True, default="")
 
     qtype = models.CharField(max_length=20, choices=QUESTION_TYPES, default=YESNO)
+    is_required = models.BooleanField(default=True)
+    options = models.JSONField(default=list, blank=True)
 
     score_yes = models.IntegerField(default=1)
     score_no = models.IntegerField(default=0)
@@ -111,6 +147,16 @@ class Patient(models.Model):
     data = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_patients"
+    )
+    assigned_doctor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_patients"
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="updated_patients"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.full_name
@@ -265,8 +311,19 @@ class PatientNote(models.Model):
 
 
 class DoctorProfile(models.Model):
+    ROLE_DOCTOR = "doctor"
+    ROLE_CHIEF_DOCTOR = "chief_doctor"
+    ROLE_ADMIN = "admin"
+    ROLE_CHOICES = [
+        (ROLE_DOCTOR, "Doctor"),
+        (ROLE_CHIEF_DOCTOR, "Chief doctor"),
+        (ROLE_ADMIN, "Admin"),
+    ]
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="doctor_profile")
     photo_data_url = models.TextField(blank=True, default="")
+    role = models.CharField(max_length=32, choices=ROLE_CHOICES, default=ROLE_DOCTOR)
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -327,3 +384,40 @@ class RiskRedFlag(models.Model):
 
     def __str__(self):
         return f"{self.urgency_level} red flag"
+
+
+class QuestionnaireSession(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_COMPLETED = "completed"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_EXPIRED, "Expired"),
+    ]
+
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="questionnaire_sessions")
+    questionnaire = models.ForeignKey(Questionnaire, on_delete=models.CASCADE, related_name="questionnaire_sessions")
+    doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="questionnaire_sessions")
+    token = models.CharField(max_length=128, unique=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Session {self.id} for patient {self.patient_id}"
+
+
+class AuditLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=128)
+    object_type = models.CharField(max_length=64)
+    object_id = models.CharField(max_length=64, blank=True, default="")
+    details = models.JSONField(default=dict, blank=True)
+    ip_address = models.CharField(max_length=45, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.action} {self.object_type}:{self.object_id}"

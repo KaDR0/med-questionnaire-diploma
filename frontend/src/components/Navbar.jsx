@@ -67,7 +67,7 @@ function Navbar() {
             >
               <MenuItem value="en">EN</MenuItem>
               <MenuItem value="ru">RU</MenuItem>
-              <MenuItem value="kk">KAZ</MenuItem>
+              <MenuItem value="kk">KK</MenuItem>
             </TextField>
 
             {isAuthenticated ? (

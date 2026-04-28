@@ -4,16 +4,40 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
 import LogoLockup from "./brand/LogoLockup";
 
-const navItems = [
-  { labelKey: "navbar.patients", to: "/" },
-  { labelKey: "navbar.profile", to: "/profile" },
-  { labelKey: "navbar.about", to: "/about" },
-];
+const navByRole = {
+  doctor: [
+    { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
+    { id: "patients", labelKey: "navbar.patients", to: "/patients" },
+    { id: "labResults", labelKey: "navbar.labResults", to: "/patients#labs" },
+    { id: "assessments", labelKey: "navbar.assessments", to: "/patients#assessments" },
+    { id: "createQr", labelKey: "navbar.createQr", to: "/questionnaires/qr" },
+    { id: "myQuestionnaires", labelKey: "navbar.myQuestionnaires", to: "/questionnaires/my" },
+    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
+  ],
+  chief_doctor: [
+    { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
+    { id: "patients", labelKey: "navbar.patients", to: "/patients" },
+    { id: "pendingQuestionnaires", labelKey: "navbar.pendingQuestionnaires", to: "/questionnaires/pending" },
+    { id: "questionnaireSources", labelKey: "navbar.questionnaireSources", to: "/questionnaires/my" },
+    { id: "auditLog", labelKey: "navbar.auditLog", to: "/audit-log" },
+    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
+  ],
+  admin: [
+    { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
+    { id: "patients", labelKey: "navbar.patients", to: "/patients" },
+    { id: "questionnaires", labelKey: "navbar.questionnaires", to: "/questionnaires/my" },
+    { id: "pendingQuestionnaires", labelKey: "navbar.pendingQuestionnaires", to: "/questionnaires/pending" },
+    { id: "auditLog", labelKey: "navbar.auditLog", to: "/audit-log" },
+    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
+  ],
+};
 
 function AppShell({ children }) {
   const location = useLocation();
   const { t, i18n } = useTranslation();
   const { user, logout } = useAuth();
+  const role = user?.role || "doctor";
+  const navItems = navByRole[role] || navByRole.doctor;
 
   const handleLanguageChange = (event) => {
     i18n.changeLanguage(event.target.value);
@@ -56,10 +80,10 @@ function AppShell({ children }) {
           {navItems.map((item) => {
             const active =
               location.pathname === item.to ||
-              (item.to === "/" && location.pathname.startsWith("/patients"));
+              (String(item.to).startsWith("/patients") && location.pathname.startsWith("/patients"));
             return (
               <Button
-                key={item.to}
+                key={item.id}
                 component={Link}
                 to={item.to}
                 variant="text"
@@ -94,7 +118,7 @@ function AppShell({ children }) {
           <TextField select size="small" value={i18n.language} onChange={handleLanguageChange} fullWidth>
             <MenuItem value="en">EN</MenuItem>
             <MenuItem value="ru">RU</MenuItem>
-            <MenuItem value="kk">KAZ</MenuItem>
+            <MenuItem value="kk">KK</MenuItem>
           </TextField>
         </Stack>
 
@@ -103,7 +127,10 @@ function AppShell({ children }) {
             {t("navbar.workspaceFootnote")}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1, fontWeight: 600 }}>
-            {t("navbar.doctorPrefix")} {user?.first_name || user?.username || "Doctor"}
+            {t("navbar.doctorPrefix")} {user?.first_name || user?.username || t("profile.doctorFallback")}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+            {t("navbar.role")}: {role}
           </Typography>
           <Button variant="outlined" color="inherit" fullWidth onClick={logout} size="small">
             {t("navbar.logout")}

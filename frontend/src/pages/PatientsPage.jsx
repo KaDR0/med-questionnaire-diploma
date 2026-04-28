@@ -58,6 +58,7 @@ function PatientsPage() {
   });
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [creatingPatient, setCreatingPatient] = useState(false);
+  const [patientFieldErrors, setPatientFieldErrors] = useState({});
   const [newPatient, setNewPatient] = useState({
     patient_code: "",
     full_name: "",
@@ -228,6 +229,7 @@ function PatientsPage() {
       weight_kg: "",
       next_visit_date: "",
     });
+    setPatientFieldErrors({});
   };
 
   const handleOpenAddDialog = () => setAddDialogOpen(true);
@@ -248,6 +250,7 @@ function PatientsPage() {
     }
     try {
       setCreatingPatient(true);
+      setPatientFieldErrors({});
       const payload = {
         patient_code: newPatient.patient_code.trim() || null,
         full_name: newPatient.full_name.trim(),
@@ -265,8 +268,10 @@ function PatientsPage() {
       resetNewPatientForm();
     } catch (error) {
       console.error("Create patient error:", error);
+      const fieldErrors = error?.response?.data || {};
+      setPatientFieldErrors(fieldErrors);
       const message =
-        error?.response?.data?.patient_code?.[0] ||
+        fieldErrors?.patient_code?.[0] ||
         error?.response?.data?.full_name?.[0] ||
         error?.response?.data?.detail ||
         t("patients.createError");
@@ -658,7 +663,8 @@ function PatientsPage() {
               label={t("patients.patientCode")}
               value={newPatient.patient_code}
               onChange={(e) => handleNewPatientFieldChange("patient_code", e.target.value)}
-              helperText={t("patients.patientCodeHint")}
+              helperText={patientFieldErrors?.patient_code?.[0] || t("patients.patientCodeHint")}
+              error={Boolean(patientFieldErrors?.patient_code?.length)}
             />
             <TextField
               label={t("patients.fullName")}
