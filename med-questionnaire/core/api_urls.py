@@ -2,6 +2,7 @@ from django.urls import path
 from .api_views import (
     PatientListAPIView,
     PatientDetailAPIView,
+    PatientAccountLinkAPIView,
     PatientPdfAPIView,
     PatientUpdateAPIView,
     PatientIntakeAPIView,
@@ -42,6 +43,8 @@ from .api_views import (
     PublicQuestionnaireSubmitAPIView,
     DashboardStatsAPIView,
     AuditLogListAPIView,
+    UserRoleListAPIView,
+    AssignUserRoleAPIView,
     QuestionnaireSessionListAPIView,
 )
 
@@ -54,6 +57,7 @@ urlpatterns = [
     path("labs/template/", LabTemplateAPIView.as_view(), name="lab_template_api"),
     path("labs/import/", LabImportAPIView.as_view(), name="lab_import_api"),
     path("patients/<int:pk>/", PatientDetailAPIView.as_view(), name="patient_detail_api"),
+    path("patients/<int:patient_id>/link-user/", PatientAccountLinkAPIView.as_view(), name="patient_link_user_api"),
     path("patients/<int:pk>/pdf/", PatientPdfAPIView.as_view(), name="patient_pdf_api"),
     path("patients/<int:pk>/update/", PatientUpdateAPIView.as_view(), name="patient_update_api"),
     path("patients/<int:pk>/intake/", PatientIntakeAPIView.as_view(), name="patient_intake_api"),
@@ -153,6 +157,8 @@ urlpatterns = [
     path("assessments/submit/", SubmitAssessmentAPIView.as_view(), name="submit_assessment_api"),
     path("dashboard/stats/", DashboardStatsAPIView.as_view(), name="dashboard_stats_api"),
     path("audit-logs/", AuditLogListAPIView.as_view(), name="audit_log_list_api"),
+    path("users/roles/", UserRoleListAPIView.as_view(), name="user_role_list_api"),
+    path("users/<int:user_id>/assign-role/", AssignUserRoleAPIView.as_view(), name="assign_user_role_api"),
     path("questionnaire-sessions/", QuestionnaireSessionCreateAPIView.as_view(), name="questionnaire_session_create_api"),
     path("questionnaire-sessions/list/", QuestionnaireSessionListAPIView.as_view(), name="questionnaire_session_list_api"),
     path("public/questionnaire/<str:token>/", PublicQuestionnaireAPIView.as_view(), name="public_questionnaire_api"),

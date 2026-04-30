@@ -94,6 +94,7 @@ function PatientDetailPage() {
     next_visit_date: "",
   });
   const [demographicsForm, setDemographicsForm] = useState({
+    email: "",
     age: "",
     sex: "",
     height_cm: "",
@@ -191,6 +192,7 @@ function PatientDetailPage() {
       next_visit_date: patientResponse.data.next_visit_date || "",
     });
     setDemographicsForm({
+      email: patientResponse.data.email || "",
       age: patientResponse.data.age ?? "",
       sex: patientResponse.data.sex ?? "",
       height_cm: patientResponse.data.height_cm ?? "",
@@ -359,6 +361,7 @@ function PatientDetailPage() {
     try {
       setSavingDemographics(true);
       const payload = {
+        email: demographicsForm.email.trim() || null,
         age: demographicsForm.age === "" ? null : Number(demographicsForm.age),
         sex: demographicsForm.sex === "" ? null : Number(demographicsForm.sex),
         height_cm: demographicsForm.height_cm === "" ? null : Number(demographicsForm.height_cm),
@@ -1192,6 +1195,14 @@ function PatientDetailPage() {
                   </Typography>
                   <Divider sx={{ mb: 2 }} />
                   <Stack spacing={2}>
+                    <TextField
+                      type="email"
+                      label={t("patients.email")}
+                      fullWidth
+                      size="small"
+                      value={demographicsForm.email}
+                      onChange={(e) => handleDemographicsFieldChange("email", e.target.value)}
+                    />
                     <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                       <TextField
                         type="number"

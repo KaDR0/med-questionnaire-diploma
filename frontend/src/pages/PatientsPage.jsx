@@ -62,6 +62,7 @@ function PatientsPage() {
   const [newPatient, setNewPatient] = useState({
     patient_code: "",
     full_name: "",
+    email: "",
     age: "",
     sex: "",
     height_cm: "",
@@ -224,6 +225,7 @@ function PatientsPage() {
     setNewPatient({
       patient_code: "",
       full_name: "",
+      email: "",
       age: "",
       sex: "",
       height_cm: "",
@@ -255,6 +257,7 @@ function PatientsPage() {
       const payload = {
         patient_code: newPatient.patient_code.trim() || null,
         full_name: newPatient.full_name.trim(),
+        email: newPatient.email.trim() || null,
         age: newPatient.age === "" ? null : Number(newPatient.age),
         sex: newPatient.sex === "" ? null : Number(newPatient.sex),
         height_cm: newPatient.height_cm === "" ? null : Number(newPatient.height_cm),
@@ -687,6 +690,12 @@ function PatientsPage() {
               value={newPatient.full_name}
               onChange={(e) => handleNewPatientFieldChange("full_name", e.target.value)}
               required
+            />
+            <TextField
+              label={t("patients.email")}
+              type="email"
+              value={newPatient.email}
+              onChange={(e) => handleNewPatientFieldChange("email", e.target.value)}
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField

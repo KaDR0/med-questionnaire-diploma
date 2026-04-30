@@ -48,16 +48,26 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const response = await api.post("auth/login/", { email, password });
+    if (response.data?.verification_required) {
+      return response.data;
+    }
     storeTokens({ access: response.data.access, refresh: response.data.refresh });
     setUser(response.data.user);
+    return response.data;
   };
 
-  const signup = async ({ email, password, first_name, last_name, role }) => {
-    const full_name = `${first_name || ""} ${last_name || ""}`.trim();
-    const response = await api.post("auth/register/", { email, password, full_name, first_name, last_name, role });
+  const verifyPatientLoginCode = async (challengeToken, code) => {
+    const response = await api.post("auth/patient-login/verify-code/", {
+      challenge_token: challengeToken,
+      code,
+    });
     storeTokens({ access: response.data.access, refresh: response.data.refresh });
     setUser(response.data.user);
-    return { message: "SIGNUP_SUCCESS" };
+    return response.data;
+  };
+
+  const signup = async () => {
+    throw new Error("Legacy signup is disabled. Use patient or doctor OTP signup flow.");
   };
 
   const logout = async () => {
@@ -80,6 +90,7 @@ export function AuthProvider({ children }) {
         user,
         loading,
         login,
+        verifyPatientLoginCode,
         signup,
         logout,
         isAuthenticated: !!user,

@@ -5,6 +5,10 @@ import { useAuth } from "../context/AuthContext";
 import LogoLockup from "./brand/LogoLockup";
 
 const navByRole = {
+  pending: [
+    { id: "pending", labelKey: "navbar.awaitingApproval", to: "/awaiting-approval" },
+    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
+  ],
   doctor: [
     { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
     { id: "patients", labelKey: "navbar.patients", to: "/patients" },
@@ -15,6 +19,7 @@ const navByRole = {
   chief_doctor: [
     { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
     { id: "patients", labelKey: "navbar.patients", to: "/patients" },
+    { id: "userRoles", labelKey: "navbar.userRoles", to: "/users/roles" },
     { id: "pendingQuestionnaires", labelKey: "navbar.pendingQuestionnaires", to: "/questionnaires/pending" },
     { id: "questionnaireSources", labelKey: "navbar.questionnaireSources", to: "/questionnaires/my" },
     { id: "archive", labelKey: "navbar.archive", to: "/questionnaires/archive" },
@@ -26,8 +31,8 @@ function AppShell({ children }) {
   const location = useLocation();
   const { t, i18n } = useTranslation();
   const { user, logout } = useAuth();
-  const role = user?.role || "doctor";
-  const navItems = navByRole[role] || navByRole.doctor;
+  const role = user?.role || "pending";
+  const navItems = navByRole[role] || navByRole.pending;
 
   const handleLanguageChange = (event) => {
     i18n.changeLanguage(event.target.value);

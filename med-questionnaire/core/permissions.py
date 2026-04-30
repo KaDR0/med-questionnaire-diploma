@@ -13,7 +13,7 @@ def get_user_role(user):
         if profile.role == "admin":
             return DoctorProfile.ROLE_CHIEF_DOCTOR
         return profile.role
-    return DoctorProfile.ROLE_DOCTOR
+    return DoctorProfile.ROLE_PENDING
 
 
 class IsDoctorOrAbove(BasePermission):
@@ -26,3 +26,8 @@ class IsChiefDoctorOrAdmin(BasePermission):
     def has_permission(self, request, view):
         role = get_user_role(request.user)
         return role == DoctorProfile.ROLE_CHIEF_DOCTOR
+
+
+class IsPatient(BasePermission):
+    def has_permission(self, request, view):
+        return get_user_role(request.user) == DoctorProfile.ROLE_PATIENT

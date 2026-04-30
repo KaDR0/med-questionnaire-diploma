@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
+from datetime import timedelta
 
 
 class Disease(models.Model):
@@ -138,6 +139,7 @@ class Patient(models.Model):
 
     patient_code = models.CharField(max_length=12, unique=True, null=True, blank=True, verbose_name="Patient ID")
     full_name = models.CharField(max_length=255)
+    email = models.EmailField(null=True, blank=True)
 
     age = models.IntegerField(null=True, blank=True)
     sex = models.IntegerField(null=True, blank=True)
@@ -149,6 +151,9 @@ class Patient(models.Model):
     data = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+    user = models.OneToOneField(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="patient_profile"
+    )
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_patients"
     )
@@ -313,9 +318,13 @@ class PatientNote(models.Model):
 
 
 class DoctorProfile(models.Model):
+    ROLE_PENDING = "pending"
+    ROLE_PATIENT = "patient"
     ROLE_DOCTOR = "doctor"
     ROLE_CHIEF_DOCTOR = "chief_doctor"
     ROLE_CHOICES = [
+        (ROLE_PENDING, "Pending"),
+        (ROLE_PATIENT, "Patient"),
         (ROLE_DOCTOR, "Doctor"),
         (ROLE_CHIEF_DOCTOR, "Chief doctor"),
     ]
@@ -332,7 +341,7 @@ class DoctorProfile(models.Model):
     schedule = models.CharField(max_length=120, blank=True, default="")
     status = models.CharField(max_length=40, blank=True, default="")
     short_info = models.TextField(blank=True, default="")
-    role = models.CharField(max_length=32, choices=ROLE_CHOICES, default=ROLE_DOCTOR)
+    role = models.CharField(max_length=32, choices=ROLE_CHOICES, default=ROLE_PENDING)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -431,3 +440,35 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.object_type}:{self.object_id}"
+
+
+class EmailVerificationCode(models.Model):
+    PURPOSE_PATIENT_SIGNUP = "patient_signup"
+    PURPOSE_DOCTOR_SIGNUP = "doctor_signup"
+    PURPOSE_PATIENT_LOGIN = "patient_login"
+    PURPOSE_CHOICES = [
+        (PURPOSE_PATIENT_SIGNUP, "Patient signup"),
+        (PURPOSE_DOCTOR_SIGNUP, "Doctor signup"),
+        (PURPOSE_PATIENT_LOGIN, "Patient login"),
+    ]
+
+    email = models.EmailField()
+    code = models.CharField(max_length=255)
+    purpose = models.CharField(max_length=32, choices=PURPOSE_CHOICES)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["email", "purpose", "-created_at"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    @classmethod
+    def default_expiry(cls):
+        return timezone.now() + timedelta(minutes=10)
+
+    def __str__(self):
+        return f"{self.email} {self.purpose} used={self.is_used}"

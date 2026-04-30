@@ -11,6 +11,7 @@ from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework.exceptions import PermissionDenied
 
 from .models import (
     Disease,
@@ -85,11 +86,15 @@ def _audit(request, action, object_type, object_id="", details=None):
 def _permitted_patient_queryset(request):
     role = get_user_role(request.user)
     queryset = Patient.objects.all()
+    if role == DoctorProfile.ROLE_PATIENT:
+        return queryset.filter(user=request.user)
     if role == DoctorProfile.ROLE_DOCTOR:
         return queryset.filter(
             models.Q(assigned_doctor=request.user)
             | models.Q(created_by=request.user)
         )
+    if role == DoctorProfile.ROLE_PENDING:
+        return queryset.none()
     return queryset
 
 
@@ -120,6 +125,8 @@ class PatientListAPIView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         role = get_user_role(self.request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can create patient cards.")
         assigned_doctor = None
         if role == DoctorProfile.ROLE_DOCTOR:
             assigned_doctor = self.request.user
@@ -143,6 +150,42 @@ class PatientDetailAPIView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return _permitted_patient_queryset(self.request)
+
+
+class PatientAccountLinkAPIView(APIView):
+    permission_classes = [IsChiefDoctorOrAdmin]
+
+    def patch(self, request, patient_id):
+        patient = generics.get_object_or_404(Patient, pk=patient_id)
+        user_id = request.data.get("user_id")
+        email = str(request.data.get("email") or "").strip()
+
+        target_user = None
+        if user_id:
+            target_user = User.objects.filter(id=user_id).first()
+        elif email:
+            target_user = User.objects.filter(email=email).first()
+
+        if target_user is None:
+            return Response({"error": "Linked user was not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        existing_patient = Patient.objects.filter(user=target_user).exclude(id=patient.id).first()
+        if existing_patient:
+            return Response({"error": "This user is already linked to another patient card."}, status=status.HTTP_400_BAD_REQUEST)
+
+        patient.user = target_user
+        patient.updated_by = request.user if request.user.is_authenticated else None
+        patient.save(update_fields=["user", "updated_by", "updated_at"])
+
+        profile, _ = DoctorProfile.objects.get_or_create(
+            user=target_user, defaults={"role": DoctorProfile.ROLE_PATIENT}
+        )
+        if profile.role in {DoctorProfile.ROLE_PENDING, DoctorProfile.ROLE_PATIENT}:
+            if profile.role != DoctorProfile.ROLE_PATIENT:
+                profile.role = DoctorProfile.ROLE_PATIENT
+                profile.save(update_fields=["role", "updated_at"])
+
+        return Response(PatientSerializer(patient).data, status=status.HTTP_200_OK)
 
 
 class PatientPdfAPIView(APIView):
@@ -171,6 +214,9 @@ class PatientUpdateAPIView(generics.UpdateAPIView):
         return _permitted_patient_queryset(self.request)
 
     def update(self, request, *args, **kwargs):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can update patient data.")
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
@@ -185,6 +231,9 @@ class PatientUpdateAPIView(generics.UpdateAPIView):
 
 class PatientIntakeAPIView(APIView):
     def patch(self, request, pk):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can update intake data.")
         patient = _get_permitted_patient_or_404(request, pk)
         serializer = PatientIntakeSerializer(instance=patient, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -198,6 +247,8 @@ class QuestionnaireListAPIView(generics.ListCreateAPIView):
     def get_queryset(self):
         role = get_user_role(self.request.user)
         queryset = Questionnaire.objects.exclude(approval_status=Questionnaire.APPROVAL_ARCHIVED).order_by("id")
+        if role == DoctorProfile.ROLE_PENDING:
+            return queryset.none()
         if role == DoctorProfile.ROLE_CHIEF_DOCTOR:
             return queryset
         return queryset.filter(
@@ -211,6 +262,9 @@ class QuestionnaireListAPIView(generics.ListCreateAPIView):
         return QuestionnaireSerializer
 
     def perform_create(self, serializer):
+        role = get_user_role(self.request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can create questionnaires.")
         disease = serializer.validated_data.get("disease")
         if disease is None:
             disease, _ = Disease.objects.get_or_create(
@@ -284,11 +338,15 @@ class AssessmentDetailAPIView(generics.RetrieveAPIView):
     def get_queryset(self):
         role = get_user_role(self.request.user)
         queryset = Assessment.objects.all()
+        if role == DoctorProfile.ROLE_PATIENT:
+            return queryset.filter(patient__user=self.request.user)
         if role == DoctorProfile.ROLE_DOCTOR:
             return queryset.filter(
                 models.Q(patient__assigned_doctor=self.request.user)
                 | models.Q(patient__created_by=self.request.user)
             )
+        if role == DoctorProfile.ROLE_PENDING:
+            return queryset.none()
         return queryset
 
 
@@ -307,6 +365,9 @@ class PatientRiskProfileAPIView(APIView):
         return Response(serializer.data)
 
     def post(self, request, patient_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can recalculate risk profiles.")
         _get_permitted_patient_or_404(request, patient_id)
         profile = calculate_and_store_risk_profile(patient_id)
         serializer = PatientRiskProfileSerializer(profile)
@@ -481,6 +542,9 @@ class DiseaseListAPIView(APIView):
 
 class PatientLabResultDetailAPIView(APIView):
     def patch(self, request, patient_id, lab_result_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can edit lab results.")
         _get_permitted_patient_or_404(request, patient_id)
         lab_result = generics.get_object_or_404(
             LabResult.objects.prefetch_related("values"),
@@ -526,6 +590,9 @@ class PatientLabResultDetailAPIView(APIView):
         return Response(LabResultSerializer(lab_result).data)
 
     def delete(self, request, patient_id, lab_result_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can delete lab results.")
         _get_permitted_patient_or_404(request, patient_id)
         lab_result = generics.get_object_or_404(LabResult, id=lab_result_id, patient_id=patient_id)
         lab_result.delete()
@@ -541,6 +608,9 @@ class PatientNotesAPIView(APIView):
         return Response(serializer.data)
 
     def post(self, request, patient_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can create notes.")
         patient = _get_permitted_patient_or_404(request, patient_id)
         serializer = PatientNoteCreateUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -577,6 +647,9 @@ class PatientNoteDetailAPIView(APIView):
         return None
 
     def patch(self, request, patient_id, note_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can edit notes.")
         _get_permitted_patient_or_404(request, patient_id)
         note = generics.get_object_or_404(PatientNote, id=note_id, patient_id=patient_id)
         request_doctor = self._get_request_doctor(request)
@@ -606,6 +679,9 @@ class PatientNoteDetailAPIView(APIView):
         return Response(PatientNoteSerializer(note).data)
 
     def delete(self, request, patient_id, note_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can delete notes.")
         _get_permitted_patient_or_404(request, patient_id)
         note = generics.get_object_or_404(PatientNote, id=note_id, patient_id=patient_id)
         request_doctor = self._get_request_doctor(request)
@@ -629,11 +705,17 @@ class PatientDeleteAPIView(generics.DestroyAPIView):
     serializer_class = PatientSerializer
 
     def get_queryset(self):
+        role = get_user_role(self.request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            return Patient.objects.none()
         return _permitted_patient_queryset(self.request)
 
 
 class PatientImportAPIView(APIView):
     def post(self, request):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can import patients.")
         excel_file = request.FILES.get("file")
         if not excel_file:
             return Response({"error": "Excel file is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -681,6 +763,9 @@ class PatientDoctorOrderAPIView(APIView):
         )
 
     def patch(self, request, patient_id):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can update doctor orders.")
         _get_permitted_patient_or_404(request, patient_id)
         order, _ = DoctorOrder.objects.get_or_create(patient_id=patient_id)
         serializer = DoctorOrderSerializer(order, data=request.data, partial=True)
@@ -737,6 +822,9 @@ class PatientTemplateAPIView(APIView):
 
 class LabImportAPIView(APIView):
     def post(self, request):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can import lab results.")
         excel_file = request.FILES.get("file")
         if not excel_file:
             return Response({"error": "Excel file is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -765,6 +853,9 @@ class LabImportAPIView(APIView):
 
 class SubmitAssessmentAPIView(APIView):
     def post(self, request):
+        role = get_user_role(request.user)
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can submit assessments.")
         patient_id = request.data.get("patient_id")
         questionnaire_id = request.data.get("questionnaire_id")
         answers = request.data.get("answers", {})
@@ -1170,12 +1261,89 @@ class AuditLogListAPIView(generics.ListAPIView):
         )
 
 
+class UserRoleListAPIView(APIView):
+    permission_classes = [IsChiefDoctorOrAdmin]
+
+    def get(self, request):
+        users = User.objects.all().order_by("id")
+        payload = []
+        for user in users:
+            role = get_user_role(user)
+            payload.append(
+                {
+                    "id": user.id,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "full_name": f"{user.first_name} {user.last_name}".strip() or user.username,
+                    "role": role,
+                    "is_superuser": bool(getattr(user, "is_superuser", False)),
+                }
+            )
+        return Response(payload)
+
+
+class AssignUserRoleAPIView(APIView):
+    permission_classes = [IsChiefDoctorOrAdmin]
+
+    ALLOWED_TARGET_ROLES = {
+        DoctorProfile.ROLE_PENDING,
+        DoctorProfile.ROLE_PATIENT,
+        DoctorProfile.ROLE_DOCTOR,
+    }
+
+    def patch(self, request, user_id):
+        target_user = generics.get_object_or_404(User, id=user_id)
+        if getattr(target_user, "is_superuser", False):
+            return Response({"error": "Superuser role cannot be modified via this endpoint."}, status=403)
+
+        target_role = str(request.data.get("role") or "").strip()
+        if target_role not in self.ALLOWED_TARGET_ROLES:
+            return Response(
+                {
+                    "error": "Invalid role. Allowed roles: pending, patient, doctor.",
+                },
+                status=400,
+            )
+
+        profile, _ = DoctorProfile.objects.get_or_create(user=target_user, defaults={"role": DoctorProfile.ROLE_PENDING})
+        previous_role = profile.role
+        if previous_role != target_role:
+            profile.role = target_role
+            profile.save(update_fields=["role", "updated_at"])
+            _audit(
+                request,
+                "user_role_changed",
+                "User",
+                target_user.id,
+                {
+                    "target_user_email": target_user.email,
+                    "old_role": previous_role,
+                    "new_role": target_role,
+                },
+            )
+
+        return Response(
+            {
+                "id": target_user.id,
+                "email": target_user.email,
+                "full_name": f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username,
+                "old_role": previous_role,
+                "role": profile.role,
+            }
+        )
+
+
 class QuestionnaireSessionListAPIView(generics.ListAPIView):
     serializer_class = QuestionnaireSessionSerializer
 
     def get_queryset(self):
         queryset = QuestionnaireSession.objects.select_related("patient", "questionnaire", "doctor").order_by("-created_at")
         role = get_user_role(self.request.user)
+        if role == DoctorProfile.ROLE_PATIENT:
+            return queryset.filter(patient__user=self.request.user)
         if role == DoctorProfile.ROLE_DOCTOR:
             return queryset.filter(doctor=self.request.user)
+        if role == DoctorProfile.ROLE_PENDING:
+            return queryset.none()
         return queryset

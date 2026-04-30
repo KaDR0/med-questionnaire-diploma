@@ -15,6 +15,13 @@ from pathlib import Path
 
 import dj_database_url
 from dotenv import load_dotenv
+try:
+    import certifi
+except ImportError:  # pragma: no cover
+    certifi = None
+
+if certifi:
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -36,6 +43,16 @@ def _env_list(name, default=""):
     if value is None or not value.strip():
         value = default
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _env_int(name, default=0):
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value.strip())
+    except ValueError:
+        return default
 
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -175,3 +192,24 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ),
 }
+
+# Email delivery configuration.
+# Default backend is console for local/dev safety; switch to SMTP via env for real sending.
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = _env_int("EMAIL_PORT", 587)
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "").strip().replace(" ", "")
+EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = _env_bool("EMAIL_USE_SSL", False)
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@med-questionnaire.local")
+EMAIL_TIMEOUT = _env_int("EMAIL_TIMEOUT", 20)
+
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ValueError("EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be enabled.")
+
+# Verification code policy.
+VERIFICATION_CODE_TTL_SECONDS = _env_int("VERIFICATION_CODE_TTL_SECONDS", 600)
+VERIFICATION_CODE_MAX_ATTEMPTS = _env_int("VERIFICATION_CODE_MAX_ATTEMPTS", 5)
+VERIFICATION_CODE_RESEND_COOLDOWN_SECONDS = _env_int("VERIFICATION_CODE_RESEND_COOLDOWN_SECONDS", 60)
+VERIFICATION_CODE_MAX_REQUESTS_PER_HOUR = _env_int("VERIFICATION_CODE_MAX_REQUESTS_PER_HOUR", 5)

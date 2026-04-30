@@ -16,7 +16,7 @@ import LogoLockup from "../components/brand/LogoLockup";
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, verifyPatientLoginCode } = useAuth();
   const { t } = useTranslation();
 
   const [form, setForm] = useState({
@@ -25,6 +25,10 @@ function LoginPage() {
   });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [verificationStep, setVerificationStep] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [challengeToken, setChallengeToken] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
 
   const handleChange = (field, value) => {
     setForm((prev) => ({
@@ -38,7 +42,13 @@ function LoginPage() {
       setError("");
       setSubmitting(true);
 
-      await login(form.email, form.password);
+      const result = await login(form.email, form.password);
+      if (result?.verification_required) {
+        setVerificationStep(true);
+        setChallengeToken(result.challenge_token || "");
+        setVerificationEmail(result.email || form.email);
+        return;
+      }
       navigate("/");
     } catch (err) {
       console.error("Login error:", err);
@@ -54,6 +64,54 @@ function LoginPage() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleVerifyCode = async () => {
+    try {
+      setError("");
+      setSubmitting(true);
+      await verifyPatientLoginCode(challengeToken, String(verificationCode || "").trim());
+      navigate("/");
+    } catch (err) {
+      console.error("Patient login verify error:", err);
+      const message =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        t("login.error");
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    try {
+      setError("");
+      setSubmitting(true);
+      const result = await login(form.email, form.password);
+      if (result?.verification_required) {
+        setChallengeToken(result.challenge_token || "");
+        setVerificationEmail(result.email || form.email);
+      }
+    } catch (err) {
+      const message =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        t("login.error");
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleBackToLogin = () => {
+    setVerificationStep(false);
+    setVerificationCode("");
+    setChallengeToken("");
+    setVerificationEmail("");
+    setError("");
   };
 
   return (
@@ -86,32 +144,75 @@ function LoginPage() {
               </Alert>
             )}
 
-            <TextField
-              fullWidth
-              label={t("signup.email")}
-              sx={{ mb: 2 }}
-              value={form.email}
-              onChange={(e) => handleChange("email", e.target.value)}
-            />
+            {!verificationStep ? (
+              <>
+                <TextField
+                  fullWidth
+                  label={t("signup.email")}
+                  sx={{ mb: 2 }}
+                  value={form.email}
+                  onChange={(e) => handleChange("email", e.target.value)}
+                />
 
-            <TextField
-              fullWidth
-              type="password"
-              label={t("login.password")}
-              sx={{ mb: 3 }}
-              value={form.password}
-              onChange={(e) => handleChange("password", e.target.value)}
-            />
+                <TextField
+                  fullWidth
+                  type="password"
+                  label={t("login.password")}
+                  sx={{ mb: 3 }}
+                  value={form.password}
+                  onChange={(e) => handleChange("password", e.target.value)}
+                />
 
-            <Button
-              variant="contained"
-              fullWidth
-              onClick={handleSubmit}
-              disabled={submitting}
-              sx={{ mb: 2 }}
-            >
-              {submitting ? t("login.loading") : t("login.button")}
-            </Button>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={handleSubmit}
+                  disabled={submitting}
+                  sx={{ mb: 2 }}
+                >
+                  {submitting ? t("login.loading") : t("login.button")}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {t("login.patientVerificationRequired", { email: verificationEmail || form.email })}
+                </Alert>
+                <TextField
+                  fullWidth
+                  label={t("login.verificationCode")}
+                  sx={{ mb: 3 }}
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value)}
+                />
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={handleVerifyCode}
+                  disabled={submitting || !String(verificationCode || "").trim()}
+                  sx={{ mb: 2 }}
+                >
+                  {submitting ? t("login.loading") : t("login.verifyButton")}
+                </Button>
+                <Button
+                  variant="text"
+                  fullWidth
+                  onClick={handleResendCode}
+                  disabled={submitting}
+                  sx={{ mb: 1 }}
+                >
+                  {t("login.resendCode")}
+                </Button>
+                <Button
+                  variant="text"
+                  fullWidth
+                  onClick={handleBackToLogin}
+                  disabled={submitting}
+                >
+                  {t("login.backToLogin")}
+                </Button>
+              </>
+            )}
 
             <Typography variant="body2" color="text.secondary">
               {t("login.noAccount")}{" "}

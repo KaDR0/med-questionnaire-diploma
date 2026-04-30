@@ -6,6 +6,8 @@ import QuestionnaireFormPage from "./pages/QuestionnaireFormPage";
 import AssessmentResultPage from "./pages/AssessmentResultPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
+import PatientSignupPage from "./pages/PatientSignupPage";
+import DoctorSignupPage from "./pages/DoctorSignupPage";
 import ProfilePage from "./pages/ProfilePage";
 import AboutPage from "./pages/AboutPage";
 import PublicQuestionnairePage from "./pages/PublicQuestionnairePage";
@@ -21,14 +23,19 @@ import PublicQuestionnaireSuccessPage from "./pages/PublicQuestionnaireSuccessPa
 import PublicQuestionnaireExpiredPage from "./pages/PublicQuestionnaireExpiredPage";
 import PublicQuestionnaireInvalidPage from "./pages/PublicQuestionnaireInvalidPage";
 import AuditLogPage from "./pages/AuditLogPage";
+import AwaitingApprovalPage from "./pages/AwaitingApprovalPage";
+import UserRoleManagementPage from "./pages/UserRoleManagementPage";
 import ProtectedRoute from "./components/ProtectedRoute";
+import RoleRoute from "./components/RoleRoute";
 import AppShell from "./components/AppShell";
+import PatientShell from "./components/PatientShell";
+import PatientPortalPage from "./pages/PatientPortalPage";
 import { useAuth } from "./context/AuthContext";
 import { Box, CircularProgress } from "@mui/material";
 import { useTranslation } from "react-i18next";
 
 function AppRoutes() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   const { t } = useTranslation();
 
   if (loading) {
@@ -57,6 +64,14 @@ function AppRoutes() {
         path="/signup"
         element={isAuthenticated ? <Navigate to="/" replace /> : <SignupPage />}
       />
+      <Route
+        path="/signup/patient"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <PatientSignupPage />}
+      />
+      <Route
+        path="/signup/doctor"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <DoctorSignupPage />}
+      />
       <Route path="/about" element={<AboutPage />} />
       <Route path="/public/questionnaire/:token" element={<PublicQuestionnairePage />} />
       <Route path="/public/questionnaire/:token/success" element={<PublicQuestionnaireSuccessPage />} />
@@ -64,12 +79,88 @@ function AppRoutes() {
       <Route path="/public/questionnaire/invalid" element={<PublicQuestionnaireInvalidPage />} />
 
       <Route
+        path="/awaiting-approval"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["pending"]}>
+              <AppShell>
+                <AwaitingApprovalPage />
+              </AppShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <DashboardPage />
-            </AppShell>
+            {user?.role === "patient" ? (
+              <Navigate to="/patient" replace />
+            ) : (
+              <AppShell>
+                <DashboardPage />
+              </AppShell>
+            )}
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <PatientPortalPage section="home" />
+              </PatientShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/labs"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <PatientPortalPage section="labs" />
+              </PatientShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/questionnaires"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <PatientPortalPage section="questionnaires" />
+              </PatientShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/recommendations"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <PatientPortalPage section="recommendations" />
+              </PatientShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/notifications"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <PatientPortalPage section="notifications" />
+              </PatientShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -77,9 +168,11 @@ function AppRoutes() {
         path="/patients"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <PatientsPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <PatientsPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -87,9 +180,11 @@ function AppRoutes() {
         path="/profile"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <ProfilePage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor", "pending"]}>
+              <AppShell>
+                <ProfilePage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -97,9 +192,11 @@ function AppRoutes() {
         path="/patients/:id"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <PatientDetailPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <PatientDetailPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -107,9 +204,11 @@ function AppRoutes() {
         path="/patients/:id/questionnaires"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnairePage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <QuestionnairePage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -117,9 +216,11 @@ function AppRoutes() {
         path="/patients/:id/questionnaires/:questionnaireId"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnaireFormPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <QuestionnaireFormPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -127,9 +228,11 @@ function AppRoutes() {
         path="/patients/:id/assessments/:assessmentId"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <AssessmentResultPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <AssessmentResultPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -137,9 +240,11 @@ function AppRoutes() {
         path="/questionnaires/qr"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <CreateQrQuestionnairePage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <CreateQrQuestionnairePage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -147,9 +252,11 @@ function AppRoutes() {
         path="/questionnaires/my"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <MyQuestionnairesPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <MyQuestionnairesPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -157,9 +264,11 @@ function AppRoutes() {
         path="/questionnaires/create"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnaireBuilderPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <QuestionnaireBuilderPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -167,9 +276,11 @@ function AppRoutes() {
         path="/questionnaires/:id/edit"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnaireBuilderPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <QuestionnaireBuilderPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -177,9 +288,11 @@ function AppRoutes() {
         path="/questionnaires/:id"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnaireDetailPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
+              <AppShell>
+                <QuestionnaireDetailPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -187,9 +300,11 @@ function AppRoutes() {
         path="/questionnaires/pending"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <PendingQuestionnairesPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["chief_doctor"]}>
+              <AppShell>
+                <PendingQuestionnairesPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -197,9 +312,11 @@ function AppRoutes() {
         path="/questionnaires/archive"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnaireArchivePage />
-            </AppShell>
+            <RoleRoute allowedRoles={["chief_doctor"]}>
+              <AppShell>
+                <QuestionnaireArchivePage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -207,9 +324,11 @@ function AppRoutes() {
         path="/questionnaires/review/:id"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <QuestionnaireReviewPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["chief_doctor"]}>
+              <AppShell>
+                <QuestionnaireReviewPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />
@@ -217,10 +336,38 @@ function AppRoutes() {
         path="/audit-log"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <AuditLogPage />
-            </AppShell>
+            <RoleRoute allowedRoles={["chief_doctor"]}>
+              <AppShell>
+                <AuditLogPage />
+              </AppShell>
+            </RoleRoute>
           </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users/roles"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["chief_doctor"]}>
+              <AppShell>
+                <UserRoleManagementPage />
+              </AppShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="*"
+        element={
+          !isAuthenticated ? (
+            <Navigate to="/login" replace />
+          ) : user?.role === "patient" ? (
+            <Navigate to="/patient" replace />
+          ) : user?.role === "pending" ? (
+            <Navigate to="/awaiting-approval" replace />
+          ) : (
+            <Navigate to="/" replace />
+          )
         }
       />
     </Routes>

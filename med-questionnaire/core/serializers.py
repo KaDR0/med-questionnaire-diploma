@@ -290,7 +290,7 @@ class PatientNoteSerializer(serializers.ModelSerializer):
 class PatientStatusUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Patient
-        fields = ["next_visit_date", "age", "sex", "height_cm", "weight_kg"]
+        fields = ["next_visit_date", "age", "sex", "height_cm", "weight_kg", "email"]
 
 
 class DoctorOrderSerializer(serializers.ModelSerializer):

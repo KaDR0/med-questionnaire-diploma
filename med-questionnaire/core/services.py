@@ -273,6 +273,14 @@ def _build_patient_name(row_data, created_index):
     return f"Imported Patient {created_index}"
 
 
+def _extract_patient_email(row_data):
+    for field in ["email", "Email", "e-mail", "E-mail", "mail", "Mail"]:
+        value = _normalize_cell(row_data.get(field))
+        if value:
+            return str(value)
+    return None
+
+
 @transaction.atomic
 def import_patients_from_excel(file_obj, importing_user=None):
     workbook = load_workbook(file_obj, data_only=True)
@@ -326,6 +334,7 @@ def import_patients_from_excel(file_obj, importing_user=None):
         patient = Patient.objects.create(
             patient_code=patient_code,
             full_name=_build_patient_name(row_data, created + 1),
+            email=_extract_patient_email(row_data),
             age=age,
             sex=sex,
             height_cm=height_cm,
@@ -393,10 +402,10 @@ def create_patient_template_workbook():
     worksheet = workbook.active
     worksheet.title = "Patient Import"
 
-    headers = ["Patient_ID", "full_name", "age", "sex", "height_cm", "weight_kg"]
+    headers = ["Patient_ID", "full_name", "email", "age", "sex", "height_cm", "weight_kg"]
     worksheet.append(headers)
-    worksheet.append(["000000000001", "John Doe", 45, 1, 178, 82])
-    worksheet.append(["000000000002", "Aigerim N.", 34, 2, 165, 61])
+    worksheet.append(["000000000001", "John Doe", "john.doe@example.com", 45, 1, 178, 82])
+    worksheet.append(["000000000002", "Aigerim N.", "aigerim.n@example.com", 34, 2, 165, 61])
 
     output = BytesIO()
     workbook.save(output)
