@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const raw = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api/";
+const raw = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "/api/";
 const baseURL = raw.endsWith("/") ? raw : `${raw}/`;
 const ACCESS_TOKEN_KEY = "mq_access_token";
 const REFRESH_TOKEN_KEY = "mq_refresh_token";

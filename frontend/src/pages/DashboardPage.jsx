@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Card, CardContent, Chip, CircularProgress, Grid, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Grid, Stack, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 function DashboardPage() {
   const { t } = useTranslation();
   const theme = useTheme();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState(null);
+  const isChiefDoctor = user?.role === "chief_doctor";
 
   useEffect(() => {
     api
@@ -34,6 +38,51 @@ function DashboardPage() {
       },
     ];
   }, [stats, t]);
+
+  const actionLabel = (item) => {
+    const action = String(item?.action || "");
+    const objectId = item?.object_id || "";
+    const details = item?.details || {};
+    const patientId = details?.patient_id || "";
+
+    const byId = objectId ? ` #${objectId}` : "";
+    const patientRef = patientId ? ` #${patientId}` : "";
+
+    const labels = {
+      patient_created: t("dashboard.activityMap.patientCreated", { id: byId }),
+      questionnaire_created: t("dashboard.activityMap.questionnaireCreated", { id: byId }),
+      questionnaire_archived: t("dashboard.activityMap.questionnaireArchived", { id: byId }),
+      questionnaire_restored: t("dashboard.activityMap.questionnaireRestored", { id: byId }),
+      questionnaire_submitted_for_approval: t("dashboard.activityMap.questionnaireSubmitted", { id: byId }),
+      questionnaire_approved: t("dashboard.activityMap.questionnaireApproved", { id: byId }),
+      questionnaire_rejected: t("dashboard.activityMap.questionnaireRejected", { id: byId }),
+      questionnaire_changes_requested: t("dashboard.activityMap.questionnaireChangesRequested", { id: byId }),
+      questionnaire_session_created: t("dashboard.activityMap.questionnaireSessionCreated", { patientId: patientRef }),
+      assessment_submitted: t("dashboard.activityMap.assessmentSubmitted", { patientId: patientRef }),
+      public_questionnaire_completed: t("dashboard.activityMap.publicQuestionnaireCompleted", { patientId: patientRef }),
+    };
+
+    return labels[action] || t("dashboard.activityMap.defaultAction");
+  };
+
+  const actorLabel = (item) => {
+    if (item?.user_email) return item.user_email;
+    return t("dashboard.systemActor");
+  };
+
+  const timeLabel = (value) => {
+    if (!value) return t("dashboard.timeUnknown");
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return t("dashboard.timeUnknown");
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startYesterday = new Date(startToday);
+    startYesterday.setDate(startYesterday.getDate() - 1);
+    const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (date >= startToday) return `${t("dashboard.today")} ${time}`;
+    if (date >= startYesterday && date < startToday) return `${t("dashboard.yesterday")} ${time}`;
+    return date.toLocaleString();
+  };
 
   if (loading) {
     return (
@@ -85,7 +134,10 @@ function DashboardPage() {
       >
         <CardContent>
           <Typography variant="h6" sx={{ mb: 1.5, fontWeight: 700 }}>
-            {t("dashboard.recentActivity")}
+            {t("dashboard.historyTitle")}
+          </Typography>
+          <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
+            {t("dashboard.historySubtitle")}
           </Typography>
           {(stats?.recent_activity || []).length === 0 ? (
             <Stack spacing={0.5}>
@@ -95,23 +147,33 @@ function DashboardPage() {
               </Typography>
             </Stack>
           ) : (
-            <Stack spacing={1}>
-              {stats.recent_activity.map((item) => (
+            <Stack spacing={1.25}>
+              {stats.recent_activity.slice(0, 8).map((item) => (
                 <Stack
                   key={item.id}
-                  direction="row"
-                  spacing={1}
-                  alignItems="center"
-                  sx={{ py: 0.6, borderBottom: "1px solid", borderColor: "divider" }}
+                  spacing={0.25}
+                  sx={{ py: 0.9, borderBottom: "1px solid", borderColor: "divider" }}
                 >
-                  <Chip size="small" label={item.object_type} variant="outlined" />
-                  <Typography variant="body2">
-                    {item.action} #{item.object_id || "-"}
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {actionLabel(item)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {t("dashboard.activityBy", {
+                      actor: actorLabel(item),
+                      time: timeLabel(item.created_at),
+                    })}
                   </Typography>
                 </Stack>
               ))}
             </Stack>
           )}
+          {isChiefDoctor ? (
+            <Box sx={{ mt: 2 }}>
+              <Button component={Link} to="/audit-log" variant="text" size="small">
+                {t("dashboard.viewAllActions")}
+              </Button>
+            </Box>
+          ) : null}
         </CardContent>
       </Card>
     </Box>

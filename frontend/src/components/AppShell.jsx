@@ -8,8 +8,6 @@ const navByRole = {
   doctor: [
     { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
     { id: "patients", labelKey: "navbar.patients", to: "/patients" },
-    { id: "labResults", labelKey: "navbar.labResults", to: "/patients#labs" },
-    { id: "assessments", labelKey: "navbar.assessments", to: "/patients#assessments" },
     { id: "createQr", labelKey: "navbar.createQr", to: "/questionnaires/qr" },
     { id: "myQuestionnaires", labelKey: "navbar.myQuestionnaires", to: "/questionnaires/my" },
     { id: "profile", labelKey: "navbar.profile", to: "/profile" },
@@ -19,15 +17,7 @@ const navByRole = {
     { id: "patients", labelKey: "navbar.patients", to: "/patients" },
     { id: "pendingQuestionnaires", labelKey: "navbar.pendingQuestionnaires", to: "/questionnaires/pending" },
     { id: "questionnaireSources", labelKey: "navbar.questionnaireSources", to: "/questionnaires/my" },
-    { id: "auditLog", labelKey: "navbar.auditLog", to: "/audit-log" },
-    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
-  ],
-  admin: [
-    { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
-    { id: "patients", labelKey: "navbar.patients", to: "/patients" },
-    { id: "questionnaires", labelKey: "navbar.questionnaires", to: "/questionnaires/my" },
-    { id: "pendingQuestionnaires", labelKey: "navbar.pendingQuestionnaires", to: "/questionnaires/pending" },
-    { id: "auditLog", labelKey: "navbar.auditLog", to: "/audit-log" },
+    { id: "archive", labelKey: "navbar.archive", to: "/questionnaires/archive" },
     { id: "profile", labelKey: "navbar.profile", to: "/profile" },
   ],
 };

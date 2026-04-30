@@ -167,7 +167,6 @@ function SignupPage() {
             >
               <MenuItem value="doctor">{t("signup.roles.doctor")}</MenuItem>
               <MenuItem value="chief_doctor">{t("signup.roles.chiefDoctor")}</MenuItem>
-              <MenuItem value="admin">{t("signup.roles.admin")}</MenuItem>
             </TextField>
 
             <Button variant="contained" fullWidth onClick={handleSubmit} sx={{ mb: 2 }}>

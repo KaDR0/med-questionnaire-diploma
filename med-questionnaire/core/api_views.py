@@ -123,7 +123,7 @@ class PatientListAPIView(generics.ListCreateAPIView):
         assigned_doctor = None
         if role == DoctorProfile.ROLE_DOCTOR:
             assigned_doctor = self.request.user
-        elif role in {DoctorProfile.ROLE_CHIEF_DOCTOR, DoctorProfile.ROLE_ADMIN}:
+        elif role == DoctorProfile.ROLE_CHIEF_DOCTOR:
             assigned_doctor_id = self.request.data.get("assigned_doctor")
             if assigned_doctor_id:
                 assigned_doctor = User.objects.filter(id=assigned_doctor_id).first()
@@ -197,8 +197,8 @@ class QuestionnaireListAPIView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         role = get_user_role(self.request.user)
-        queryset = Questionnaire.objects.all().order_by("id")
-        if role in {DoctorProfile.ROLE_CHIEF_DOCTOR, DoctorProfile.ROLE_ADMIN}:
+        queryset = Questionnaire.objects.exclude(approval_status=Questionnaire.APPROVAL_ARCHIVED).order_by("id")
+        if role == DoctorProfile.ROLE_CHIEF_DOCTOR:
             return queryset
         return queryset.filter(
             models.Q(approval_status=Questionnaire.APPROVAL_APPROVED, is_active=True)
@@ -639,7 +639,7 @@ class PatientImportAPIView(APIView):
             return Response({"error": "Excel file is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            result = import_patients_from_excel(excel_file)
+            result = import_patients_from_excel(excel_file, importing_user=request.user)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
@@ -742,7 +742,7 @@ class LabImportAPIView(APIView):
             return Response({"error": "Excel file is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            result = import_labs_from_excel(excel_file)
+            result = import_labs_from_excel(excel_file, importing_user=request.user)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
@@ -816,13 +816,13 @@ class SubmitAssessmentAPIView(APIView):
         )
 
 
-class QuestionnaireDetailAPIView(generics.RetrieveUpdateAPIView):
+class QuestionnaireDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = QuestionnaireSerializer
 
     def get_queryset(self):
         role = get_user_role(self.request.user)
-        queryset = Questionnaire.objects.all()
-        if role in {DoctorProfile.ROLE_CHIEF_DOCTOR, DoctorProfile.ROLE_ADMIN}:
+        queryset = Questionnaire.objects.exclude(approval_status=Questionnaire.APPROVAL_ARCHIVED)
+        if role == DoctorProfile.ROLE_CHIEF_DOCTOR:
             return queryset
         return queryset.filter(
             models.Q(created_by=self.request.user)
@@ -837,7 +837,7 @@ class QuestionnaireDetailAPIView(generics.RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         questionnaire = self.get_object()
         role = get_user_role(request.user)
-        if role not in {DoctorProfile.ROLE_CHIEF_DOCTOR, DoctorProfile.ROLE_ADMIN}:
+        if role != DoctorProfile.ROLE_CHIEF_DOCTOR:
             if questionnaire.created_by_id != request.user.id:
                 return Response({"detail": "Вы можете редактировать только свои опросники."}, status=403)
             if questionnaire.approval_status not in {
@@ -848,12 +848,32 @@ class QuestionnaireDetailAPIView(generics.RetrieveUpdateAPIView):
                 return Response({"detail": "Редактирование запрещено для текущего статуса."}, status=400)
         return super().update(request, *args, **kwargs)
 
+    def destroy(self, request, *args, **kwargs):
+        questionnaire = self.get_object()
+        role = get_user_role(request.user)
+        if role != DoctorProfile.ROLE_CHIEF_DOCTOR:
+            if questionnaire.created_by_id != request.user.id:
+                return Response({"detail": "Вы можете удалять только свои опросники."}, status=403)
+            if questionnaire.approval_status not in {
+                Questionnaire.APPROVAL_DRAFT,
+                Questionnaire.APPROVAL_REJECTED,
+                Questionnaire.APPROVAL_CHANGES,
+            }:
+                return Response({"detail": "Удаление запрещено для текущего статуса."}, status=400)
+        questionnaire.approval_status = Questionnaire.APPROVAL_ARCHIVED
+        questionnaire.is_active = False
+        questionnaire.save(update_fields=["approval_status", "is_active", "updated_at"])
+        _audit(request, "questionnaire_archived", "Questionnaire", questionnaire.id)
+        return Response({"detail": "Questionnaire moved to archive."}, status=status.HTTP_200_OK)
+
 
 class SubmitQuestionnaireForApprovalAPIView(APIView):
     permission_classes = [IsDoctorOrAbove]
 
     def post(self, request, pk):
         questionnaire = generics.get_object_or_404(Questionnaire, pk=pk)
+        if questionnaire.approval_status == Questionnaire.APPROVAL_ARCHIVED:
+            return Response({"detail": "Archived questionnaire cannot be submitted for approval."}, status=400)
         if questionnaire.created_by_id != request.user.id and get_user_role(request.user) == DoctorProfile.ROLE_DOCTOR:
             return Response({"detail": "Можно отправить только свой опросник."}, status=403)
         questionnaire.approval_status = Questionnaire.APPROVAL_PENDING
@@ -871,11 +891,76 @@ class PendingQuestionnairesAPIView(generics.ListAPIView):
         return Questionnaire.objects.filter(approval_status=Questionnaire.APPROVAL_PENDING).order_by("-updated_at")
 
 
+class ArchivedQuestionnairesAPIView(generics.ListAPIView):
+    permission_classes = [IsChiefDoctorOrAdmin]
+    serializer_class = QuestionnaireSerializer
+
+    def get_queryset(self):
+        return Questionnaire.objects.filter(approval_status=Questionnaire.APPROVAL_ARCHIVED).order_by("-updated_at")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()[:200]
+        serialized = self.get_serializer(queryset, many=True).data
+        ids = [row["id"] for row in serialized]
+
+        archive_log_rows = (
+            AuditLog.objects.select_related("user")
+            .filter(action="questionnaire_archived", object_type="Questionnaire", object_id__in=[str(i) for i in ids])
+            .order_by("-created_at")
+        )
+        archive_by_questionnaire = {}
+        for row in archive_log_rows:
+            if row.object_id in archive_by_questionnaire:
+                continue
+            archive_by_questionnaire[row.object_id] = row
+
+        payload = []
+        for row in serialized:
+            log_row = archive_by_questionnaire.get(str(row["id"]))
+            payload.append(
+                {
+                    **row,
+                    "archived_at": log_row.created_at if log_row else row.get("updated_at"),
+                    "archived_by_email": log_row.user.email if log_row and log_row.user else "",
+                }
+            )
+        return Response(payload)
+
+
+class RestoreQuestionnaireAPIView(APIView):
+    permission_classes = [IsChiefDoctorOrAdmin]
+
+    def post(self, request, pk):
+        questionnaire = generics.get_object_or_404(Questionnaire, pk=pk)
+        if questionnaire.approval_status != Questionnaire.APPROVAL_ARCHIVED:
+            return Response({"detail": "Only archived questionnaires can be restored."}, status=400)
+
+        questionnaire.approval_status = Questionnaire.APPROVAL_DRAFT
+        questionnaire.is_active = True
+        questionnaire.review_comment = ""
+        questionnaire.approved_by = None
+        questionnaire.approved_at = None
+        questionnaire.save(
+            update_fields=[
+                "approval_status",
+                "is_active",
+                "review_comment",
+                "approved_by",
+                "approved_at",
+                "updated_at",
+            ]
+        )
+        _audit(request, "questionnaire_restored", "Questionnaire", questionnaire.id)
+        return Response({"detail": "Questionnaire restored from archive."}, status=status.HTTP_200_OK)
+
+
 class ApproveQuestionnaireAPIView(APIView):
     permission_classes = [IsChiefDoctorOrAdmin]
 
     def post(self, request, pk):
         questionnaire = generics.get_object_or_404(Questionnaire, pk=pk)
+        if questionnaire.approval_status == Questionnaire.APPROVAL_ARCHIVED:
+            return Response({"detail": "Archived questionnaire cannot be approved."}, status=400)
         questionnaire.approval_status = Questionnaire.APPROVAL_APPROVED
         questionnaire.approved_by = request.user
         questionnaire.approved_at = timezone.now()
@@ -890,6 +975,8 @@ class RejectQuestionnaireAPIView(APIView):
 
     def post(self, request, pk):
         questionnaire = generics.get_object_or_404(Questionnaire, pk=pk)
+        if questionnaire.approval_status == Questionnaire.APPROVAL_ARCHIVED:
+            return Response({"detail": "Archived questionnaire cannot be rejected."}, status=400)
         comment = (request.data.get("review_comment") or "").strip()
         if not comment:
             return Response({"review_comment": ["Комментарий обязателен."]}, status=400)
@@ -905,6 +992,8 @@ class RequestQuestionnaireChangesAPIView(APIView):
 
     def post(self, request, pk):
         questionnaire = generics.get_object_or_404(Questionnaire, pk=pk)
+        if questionnaire.approval_status == Questionnaire.APPROVAL_ARCHIVED:
+            return Response({"detail": "Archived questionnaire cannot be sent for changes."}, status=400)
         comment = (request.data.get("review_comment") or "").strip()
         if not comment:
             return Response({"review_comment": ["Комментарий обязателен."]}, status=400)
@@ -1034,6 +1123,8 @@ class DashboardStatsAPIView(APIView):
         recent_activity_payload = [
             {
                 "id": item.id,
+                "user_id": item.user_id,
+                "user_email": item.user.email if item.user else "",
                 "action": item.action,
                 "object_type": item.object_type,
                 "object_id": item.object_id,

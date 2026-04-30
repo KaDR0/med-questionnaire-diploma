@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import transaction
+from django.db import models, transaction
 from openpyxl import load_workbook
 from openpyxl import Workbook
 from reportlab.lib import colors
@@ -17,7 +17,8 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from .models import Answer, Assessment, LabIndicator, LabResult, LabValue, Patient, Question, Questionnaire
+from .models import Answer, Assessment, DoctorProfile, LabIndicator, LabResult, LabValue, Patient, Question, Questionnaire
+from .permissions import get_user_role
 
 
 def _register_pdf_font():
@@ -273,7 +274,7 @@ def _build_patient_name(row_data, created_index):
 
 
 @transaction.atomic
-def import_patients_from_excel(file_obj):
+def import_patients_from_excel(file_obj, importing_user=None):
     workbook = load_workbook(file_obj, data_only=True)
     worksheet = workbook.active
 
@@ -330,6 +331,14 @@ def import_patients_from_excel(file_obj):
             height_cm=height_cm,
             weight_kg=weight_kg,
             data=row_data,
+            created_by=importing_user if getattr(importing_user, "is_authenticated", False) else None,
+            updated_by=importing_user if getattr(importing_user, "is_authenticated", False) else None,
+            assigned_doctor=(
+                importing_user
+                if getattr(importing_user, "is_authenticated", False)
+                and get_user_role(importing_user) == DoctorProfile.ROLE_DOCTOR
+                else None
+            ),
         )
         created += 1
         imported_patients.append(
@@ -396,7 +405,7 @@ def create_patient_template_workbook():
 
 
 @transaction.atomic
-def import_labs_from_excel(file_obj):
+def import_labs_from_excel(file_obj, importing_user=None):
     workbook = load_workbook(file_obj, data_only=True)
     worksheet = workbook.active
 
@@ -441,6 +450,8 @@ def import_labs_from_excel(file_obj):
     headers_normalized = {_normalize_indicator_name(h) for h in headers}
     is_long_format = len(headers_normalized.intersection(long_format_keys)) >= 4
 
+    role = get_user_role(importing_user) if getattr(importing_user, "is_authenticated", False) else None
+
     if is_long_format:
         grouped_rows = defaultdict(list)
         all_rows = list(rows)
@@ -463,10 +474,20 @@ def import_labs_from_excel(file_obj):
             grouped_rows[str(patient_code)].append((row_number, row_data))
 
         for patient_code, patient_rows in grouped_rows.items():
-            patient = Patient.objects.filter(patient_code=str(patient_code)).first()
+            patient_queryset = Patient.objects.filter(patient_code=str(patient_code))
+            if role == DoctorProfile.ROLE_DOCTOR:
+                patient_queryset = patient_queryset.filter(
+                    models.Q(assigned_doctor=importing_user) | models.Q(created_by=importing_user)
+                )
+            patient = patient_queryset.first()
             if not patient:
                 skipped += len(patient_rows)
-                errors.append(f"Patient with Patient_ID {patient_code} was not found.")
+                if role == DoctorProfile.ROLE_DOCTOR:
+                    errors.append(
+                        f"Patient with Patient_ID {patient_code} was not found or is not assigned to current doctor."
+                    )
+                else:
+                    errors.append(f"Patient with Patient_ID {patient_code} was not found.")
                 continue
 
             by_date = defaultdict(list)
@@ -538,10 +559,20 @@ def import_labs_from_excel(file_obj):
             errors.append(f"Row {row_number}: Patient_ID is empty.")
             continue
 
-        patient = Patient.objects.filter(patient_code=str(patient_code)).first()
+        patient_queryset = Patient.objects.filter(patient_code=str(patient_code))
+        if role == DoctorProfile.ROLE_DOCTOR:
+            patient_queryset = patient_queryset.filter(
+                models.Q(assigned_doctor=importing_user) | models.Q(created_by=importing_user)
+            )
+        patient = patient_queryset.first()
         if not patient:
             skipped += 1
-            errors.append(f"Row {row_number}: patient with Patient_ID {patient_code} was not found.")
+            if role == DoctorProfile.ROLE_DOCTOR:
+                errors.append(
+                    f"Row {row_number}: patient with Patient_ID {patient_code} was not found or is not assigned to current doctor."
+                )
+            else:
+                errors.append(f"Row {row_number}: patient with Patient_ID {patient_code} was not found.")
             continue
 
         result_date = _parse_excel_date(row_data.get("Date"))

@@ -57,12 +57,14 @@ class Questionnaire(models.Model):
     APPROVAL_APPROVED = "approved"
     APPROVAL_REJECTED = "rejected"
     APPROVAL_CHANGES = "changes_requested"
+    APPROVAL_ARCHIVED = "archived"
     APPROVAL_CHOICES = [
         (APPROVAL_DRAFT, "Draft"),
         (APPROVAL_PENDING, "Pending approval"),
         (APPROVAL_APPROVED, "Approved"),
         (APPROVAL_REJECTED, "Rejected"),
         (APPROVAL_CHANGES, "Changes requested"),
+        (APPROVAL_ARCHIVED, "Archived"),
     ]
     approval_status = models.CharField(max_length=32, choices=APPROVAL_CHOICES, default=APPROVAL_DRAFT)
     created_by = models.ForeignKey(
@@ -313,15 +315,23 @@ class PatientNote(models.Model):
 class DoctorProfile(models.Model):
     ROLE_DOCTOR = "doctor"
     ROLE_CHIEF_DOCTOR = "chief_doctor"
-    ROLE_ADMIN = "admin"
     ROLE_CHOICES = [
         (ROLE_DOCTOR, "Doctor"),
         (ROLE_CHIEF_DOCTOR, "Chief doctor"),
-        (ROLE_ADMIN, "Admin"),
     ]
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="doctor_profile")
     photo_data_url = models.TextField(blank=True, default="")
+    specialty = models.CharField(max_length=120, blank=True, default="")
+    department = models.CharField(max_length=120, blank=True, default="")
+    workplace = models.CharField(max_length=160, blank=True, default="")
+    experience_years = models.CharField(max_length=32, blank=True, default="")
+    work_direction = models.CharField(max_length=160, blank=True, default="")
+    competencies = models.TextField(blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    schedule = models.CharField(max_length=120, blank=True, default="")
+    status = models.CharField(max_length=40, blank=True, default="")
+    short_info = models.TextField(blank=True, default="")
     role = models.CharField(max_length=32, choices=ROLE_CHOICES, default=ROLE_DOCTOR)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

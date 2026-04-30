@@ -158,6 +158,10 @@ CORS_ALLOWED_ORIGINS = _env_list(
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5175,http://127.0.0.1:5175",
 )
 
+# In local development, frontend may be opened via LAN IP (e.g. 192.168.x.x:5173).
+# Allow all origins in DEBUG to avoid browser-side "Network Error" from blocked CORS.
+CORS_ALLOW_ALL_ORIGINS = _env_bool("CORS_ALLOW_ALL_ORIGINS", DEBUG)
+
 CSRF_TRUSTED_ORIGINS = _env_list(
     "CSRF_TRUSTED_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5175,http://127.0.0.1:5175",

@@ -3,11 +3,14 @@ import { Alert, Box, Button, Card, CardContent, Chip, Stack, Typography } from "
 import api from "../api/axios";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 function MyQuestionnairesPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
+  const isChiefDoctor = user?.role === "chief_doctor";
 
   const load = async () => {
     try {
@@ -28,6 +31,15 @@ function MyQuestionnairesPage() {
       await load();
     } catch (err) {
       setError(err?.response?.data?.detail || t("myQuestionnaires.submitError"));
+    }
+  };
+
+  const deleteQuestionnaire = async (id) => {
+    try {
+      await api.delete(`questionnaires/${id}/`);
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.detail || t("myQuestionnaires.deleteError"));
     }
   };
 
@@ -65,6 +77,11 @@ function MyQuestionnairesPage() {
                   {["draft", "rejected", "changes_requested"].includes(item.approval_status) ? (
                     <Button variant="outlined" onClick={() => submitForApproval(item.id)}>
                       {t("myQuestionnaires.submitForApproval")}
+                    </Button>
+                  ) : null}
+                  {isChiefDoctor ? (
+                    <Button color="error" variant="outlined" onClick={() => deleteQuestionnaire(item.id)}>
+                      {t("myQuestionnaires.delete")}
                     </Button>
                   ) : null}
                 </Stack>

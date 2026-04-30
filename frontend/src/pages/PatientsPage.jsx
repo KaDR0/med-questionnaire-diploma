@@ -156,6 +156,7 @@ function PatientsPage() {
       });
 
       setLabImportResult(response.data);
+      await loadPatients();
       showFeedback(t("patients.labImportSuccess"));
     } catch (error) {
       console.error("Import labs error:", error);
@@ -371,6 +372,21 @@ function PatientsPage() {
             {t("patients.tip3")}
           </Typography>
         </Stack>
+      </Alert>
+
+      <Alert
+        severity="success"
+        variant="outlined"
+        sx={{
+          mb: 3,
+          borderRadius: 2,
+          bgcolor: alpha(theme.palette.success.main, 0.05),
+          borderColor: alpha(theme.palette.success.main, 0.2),
+        }}
+      >
+        <Typography variant="body2" color="text.secondary">
+          {`${t("patients.patientRecord")}: ${t("detail.overview")}, ${t("detail.labs")}, ${t("detail.assessments")}.`}
+        </Typography>
       </Alert>
 
       <Box sx={{ mb: 3 }}>

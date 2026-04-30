@@ -15,9 +15,33 @@ function AuditLogPage() {
       .catch((err) => setError(err?.response?.data?.detail || t("auditLog.loadError")));
   }, [t]);
 
+  const toMessage = (item) => {
+    const action = String(item?.action || "");
+    const details = item?.details || {};
+    const objectId = item?.object_id ? ` #${item.object_id}` : "";
+    const patientId = details?.patient_id ? ` #${details.patient_id}` : "";
+    const map = {
+      patient_created: t("dashboard.activityMap.patientCreated", { id: objectId }),
+      questionnaire_created: t("dashboard.activityMap.questionnaireCreated", { id: objectId }),
+      questionnaire_archived: t("dashboard.activityMap.questionnaireArchived", { id: objectId }),
+      questionnaire_restored: t("dashboard.activityMap.questionnaireRestored", { id: objectId }),
+      questionnaire_submitted_for_approval: t("dashboard.activityMap.questionnaireSubmitted", { id: objectId }),
+      questionnaire_approved: t("dashboard.activityMap.questionnaireApproved", { id: objectId }),
+      questionnaire_rejected: t("dashboard.activityMap.questionnaireRejected", { id: objectId }),
+      questionnaire_changes_requested: t("dashboard.activityMap.questionnaireChangesRequested", { id: objectId }),
+      questionnaire_session_created: t("dashboard.activityMap.questionnaireSessionCreated", { patientId }),
+      assessment_submitted: t("dashboard.activityMap.assessmentSubmitted", { patientId }),
+      public_questionnaire_completed: t("dashboard.activityMap.publicQuestionnaireCompleted", { patientId }),
+    };
+    return map[action] || t("dashboard.activityMap.defaultAction");
+  };
+
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>{t("auditLog.title")}</Typography>
+      <Typography variant="h4" sx={{ mb: 0.75 }}>{t("dashboard.viewAllActions")}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {t("dashboard.historySubtitle")}
+      </Typography>
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
       <Card>
         <CardContent>
@@ -27,11 +51,12 @@ function AuditLogPage() {
             <Stack spacing={1}>
               {items.map((item) => (
                 <Box key={item.id}>
-                  <Typography variant="body2">
-                    {item.action} / {item.object_type}#{item.object_id || "-"} / {item.user_email || "-"}
-                  </Typography>
+                  <Typography variant="body2">{toMessage(item)}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {new Date(item.created_at).toLocaleString()}
+                    {t("dashboard.activityBy", {
+                      actor: item.user_email || t("dashboard.systemActor"),
+                      time: new Date(item.created_at).toLocaleString(),
+                    })}
                   </Typography>
                 </Box>
               ))}

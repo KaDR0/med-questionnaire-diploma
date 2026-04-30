@@ -16,6 +16,7 @@ import DashboardPage from "./pages/DashboardPage";
 import QuestionnaireBuilderPage from "./pages/QuestionnaireBuilderPage";
 import QuestionnaireDetailPage from "./pages/QuestionnaireDetailPage";
 import QuestionnaireReviewPage from "./pages/QuestionnaireReviewPage";
+import QuestionnaireArchivePage from "./pages/QuestionnaireArchivePage";
 import PublicQuestionnaireSuccessPage from "./pages/PublicQuestionnaireSuccessPage";
 import PublicQuestionnaireExpiredPage from "./pages/PublicQuestionnaireExpiredPage";
 import PublicQuestionnaireInvalidPage from "./pages/PublicQuestionnaireInvalidPage";
@@ -188,6 +189,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <AppShell>
               <PendingQuestionnairesPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/questionnaires/archive"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <QuestionnaireArchivePage />
             </AppShell>
           </ProtectedRoute>
         }
