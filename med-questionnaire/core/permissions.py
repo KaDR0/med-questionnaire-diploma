@@ -1,6 +1,8 @@
+from django.db.models import Q
+
 from rest_framework.permissions import BasePermission
 
-from .models import DoctorProfile
+from .models import DoctorProfile, Patient
 
 
 def get_user_role(user):
@@ -14,6 +16,23 @@ def get_user_role(user):
             return DoctorProfile.ROLE_CHIEF_DOCTOR
         return profile.role
     return DoctorProfile.ROLE_PENDING
+
+
+def permitted_patients_queryset(request):
+    """
+    Patients visible to the current user (same rules as patient list API).
+    Used by assignment serializers and other APIs that must scope by patient access.
+    """
+    user = request.user
+    role = get_user_role(user)
+    queryset = Patient.objects.all()
+    if role == DoctorProfile.ROLE_PATIENT:
+        return queryset.filter(user=user)
+    if role == DoctorProfile.ROLE_DOCTOR:
+        return queryset.filter(Q(assigned_doctor=user) | Q(created_by=user))
+    if role == DoctorProfile.ROLE_PENDING:
+        return queryset.none()
+    return queryset
 
 
 class IsDoctorOrAbove(BasePermission):

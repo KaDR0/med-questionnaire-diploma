@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
 from dotenv import load_dotenv
@@ -179,6 +180,13 @@ CORS_ALLOWED_ORIGINS = _env_list(
 # Allow all origins in DEBUG to avoid browser-side "Network Error" from blocked CORS.
 CORS_ALLOW_ALL_ORIGINS = _env_bool("CORS_ALLOW_ALL_ORIGINS", DEBUG)
 
+# Required so browsers send/receive httpOnly cookies for patient trusted-device login.
+CORS_ALLOW_CREDENTIALS = _env_bool("CORS_ALLOW_CREDENTIALS", True)
+
+# With credentials, browsers reject wildcard ACAO; disable allow-all and rely on CORS_ALLOWED_ORIGINS.
+if CORS_ALLOW_CREDENTIALS and CORS_ALLOW_ALL_ORIGINS:
+    CORS_ALLOW_ALL_ORIGINS = False
+
 CSRF_TRUSTED_ORIGINS = _env_list(
     "CSRF_TRUSTED_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5175,http://127.0.0.1:5175",
@@ -196,7 +204,12 @@ REST_FRAMEWORK = {
 # Email delivery configuration.
 # Default backend is console for local/dev safety; switch to SMTP via env for real sending.
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
-EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+_raw_email_host = (os.getenv("EMAIL_HOST", "") or "").strip()
+if _raw_email_host and "://" in _raw_email_host:
+    parsed_host = urlparse(_raw_email_host).hostname or ""
+    EMAIL_HOST = parsed_host.strip()
+else:
+    EMAIL_HOST = _raw_email_host
 EMAIL_PORT = _env_int("EMAIL_PORT", 587)
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "").strip()
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "").strip().replace(" ", "")
@@ -205,6 +218,10 @@ EMAIL_USE_SSL = _env_bool("EMAIL_USE_SSL", False)
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@med-questionnaire.local")
 EMAIL_TIMEOUT = _env_int("EMAIL_TIMEOUT", 20)
 
+# Patient-facing links in transactional emails (frontend origin, no trailing slash).
+PATIENT_PORTAL_BASE_URL = os.getenv("PATIENT_PORTAL_BASE_URL", "").strip().rstrip("/")
+EMAIL_SITE_BRAND_NAME = (os.getenv("EMAIL_SITE_BRAND_NAME", "") or "").strip() or "Med Questionnaire"
+
 if EMAIL_USE_TLS and EMAIL_USE_SSL:
     raise ValueError("EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be enabled.")
 
@@ -212,4 +229,21 @@ if EMAIL_USE_TLS and EMAIL_USE_SSL:
 VERIFICATION_CODE_TTL_SECONDS = _env_int("VERIFICATION_CODE_TTL_SECONDS", 600)
 VERIFICATION_CODE_MAX_ATTEMPTS = _env_int("VERIFICATION_CODE_MAX_ATTEMPTS", 5)
 VERIFICATION_CODE_RESEND_COOLDOWN_SECONDS = _env_int("VERIFICATION_CODE_RESEND_COOLDOWN_SECONDS", 60)
-VERIFICATION_CODE_MAX_REQUESTS_PER_HOUR = _env_int("VERIFICATION_CODE_MAX_REQUESTS_PER_HOUR", 5)
+# Rolling 1-hour window on EmailVerificationCode rows per email+purpose.
+# DEBUG defaults to a high limit so local testing (repeated logins without trusted-device) does not lock accounts.
+# Production default remains 5 unless overridden via env.
+_ver_hourly_default = 100 if DEBUG else 5
+VERIFICATION_CODE_MAX_REQUESTS_PER_HOUR = _env_int(
+    "VERIFICATION_CODE_MAX_REQUESTS_PER_HOUR",
+    _ver_hourly_default,
+)
+
+# Patient trusted device ("remember this browser") — password still required; OTP skipped until expiry.
+PATIENT_TRUSTED_DEVICE_MAX_AGE_SECONDS = _env_int(
+    "PATIENT_TRUSTED_DEVICE_MAX_AGE_SECONDS",
+    30 * 24 * 3600,
+)
+PATIENT_TRUSTED_DEVICE_COOKIE_NAME = os.getenv("PATIENT_TRUSTED_DEVICE_COOKIE_NAME", "mq_patient_td")
+# Used for HTTPS only: plain HTTP never sets Secure cookies (see core/trusted_device._cookie_secure).
+# Typical: unset + HTTPS in production, or explicit true/false behind a reverse proxy.
+PATIENT_TRUSTED_DEVICE_COOKIE_SECURE = _env_bool("PATIENT_TRUSTED_DEVICE_COOKIE_SECURE", not DEBUG)

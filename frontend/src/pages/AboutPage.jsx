@@ -2,6 +2,7 @@ import { Box, Button, Card, CardContent, Container, Grid, Stack, Typography } fr
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import LogoLockup from "../components/brand/LogoLockup";
+import AuthScaffold from "../components/AuthScaffold";
 
 const featureKeys = [
   "patients",
@@ -19,8 +20,8 @@ function AboutPage() {
   const { t } = useTranslation();
 
   return (
-    <Box className="mq-workspace-bg" sx={{ minHeight: "100vh" }}>
-      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 } }}>
+    <AuthScaffold>
+      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, px: { xs: 2, sm: 3 } }}>
         <Stack spacing={3}>
           <Card className="mq-animate-fade-up">
             <CardContent sx={{ p: { xs: 3, md: 4 } }}>
@@ -182,7 +183,7 @@ function AboutPage() {
           </Box>
         </Stack>
       </Container>
-    </Box>
+    </AuthScaffold>
   );
 }
 

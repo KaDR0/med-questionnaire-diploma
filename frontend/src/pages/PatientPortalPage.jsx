@@ -1,7 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Grid, List, ListItem, ListItemText, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import api from "../api/axios";
 import { useTranslation } from "react-i18next";
+import { localizedAssignmentSummaryPreview } from "../utils/assessmentInterpretation";
+
+/** True when due_date (YYYY-MM-DD) is strictly before today in local calendar. */
+function isAssignmentDuePast(dueStr) {
+  if (!dueStr) return false;
+  const parts = String(dueStr).split("-");
+  if (parts.length !== 3) return false;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return false;
+  const due = new Date(y, m - 1, d);
+  const t = new Date();
+  const today = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  return due < today;
+}
 
 function PatientPortalPage({ section = "home" }) {
   const { t } = useTranslation();
@@ -12,7 +29,8 @@ function PatientPortalPage({ section = "home" }) {
   const [assessments, setAssessments] = useState([]);
   const [doctorOrder, setDoctorOrder] = useState(null);
   const [riskProfile, setRiskProfile] = useState(null);
-  const [availableQuestionnaires, setAvailableQuestionnaires] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [engineRecommendations, setEngineRecommendations] = useState(null);
 
   const patientId = patient?.id;
 
@@ -29,18 +47,18 @@ function PatientPortalPage({ section = "home" }) {
         }
         setPatient(myPatient);
 
-        const [labsRes, assessmentsRes, orderRes, riskRes] = await Promise.all([
+        const [labsRes, assessmentsRes, orderRes, riskRes, assignmentsRes] = await Promise.all([
           api.get(`patients/${myPatient.id}/labs/?period=all`),
           api.get(`patients/${myPatient.id}/assessments/`),
           api.get(`patients/${myPatient.id}/doctor-order/`),
           api.get(`patients/${myPatient.id}/risk-profile/`),
+          api.get("patient/questionnaire-assignments/"),
         ]);
-        const questionnairesRes = await api.get("questionnaires/");
         setLabs(Array.isArray(labsRes.data) ? labsRes.data : []);
         setAssessments(Array.isArray(assessmentsRes.data) ? assessmentsRes.data : []);
         setDoctorOrder(orderRes.data || null);
         setRiskProfile(riskRes.data || null);
-        setAvailableQuestionnaires(Array.isArray(questionnairesRes.data) ? questionnairesRes.data : []);
+        setAssignments(Array.isArray(assignmentsRes.data) ? assignmentsRes.data : []);
       } catch (e) {
         setError(e?.response?.data?.error || t("patientPortal.loadError"));
       } finally {
@@ -49,6 +67,22 @@ function PatientPortalPage({ section = "home" }) {
     };
     load();
   }, [t]);
+
+  useEffect(() => {
+    if (!patientId || section !== "recommendations") return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get(`patients/${patientId}/recommendations/`);
+        if (!cancelled) setEngineRecommendations(data);
+      } catch {
+        if (!cancelled) setEngineRecommendations(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId, section]);
 
   const notifications = useMemo(() => {
     const records = [];
@@ -162,14 +196,63 @@ function PatientPortalPage({ section = "home" }) {
     return rows;
   }, [labs, t]);
 
-  const completedQuestionnaireIds = useMemo(
-    () => new Set(assessments.map((a) => a?.questionnaire).filter(Boolean)),
-    [assessments]
+  const openAssignmentsCount = useMemo(
+    () =>
+      assignments.filter(
+        (a) =>
+          (a.status === "assigned" || a.status === "in_progress") &&
+          !isAssignmentDuePast(a.due_date)
+      ).length,
+    [assignments]
   );
 
-  const pendingQuestionnaires = useMemo(() => {
-    return availableQuestionnaires.filter((q) => !completedQuestionnaireIds.has(q?.id));
-  }, [availableQuestionnaires, completedQuestionnaireIds]);
+  const ongoingAssignments = useMemo(
+    () =>
+      assignments.filter((a) =>
+        ["assigned", "in_progress", "expired", "cancelled"].includes(a.status)
+      ),
+    [assignments]
+  );
+
+  const completedAssignments = useMemo(
+    () => assignments.filter((a) => a.status === "completed"),
+    [assignments]
+  );
+
+  const formatPortalDateTime = (value) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleString();
+  };
+
+  const formatPortalDateOnly = (value) => {
+    if (!value) return "—";
+    const d = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleDateString();
+  };
+
+  const assignmentStatusLabel = (row) =>
+    t(`patientPortal.assignmentStatus.${row.status}`, {
+      defaultValue: row.status_label || row.status,
+    });
+
+  const assignmentOngoingStatusChip = (row) => {
+    const label = assignmentStatusLabel(row);
+    const s = row?.status;
+    const color =
+      s === "assigned"
+        ? "primary"
+        : s === "in_progress"
+          ? "info"
+          : s === "expired"
+            ? "warning"
+            : s === "cancelled"
+              ? "default"
+              : "default";
+    return <Chip size="small" label={label} color={color} variant="outlined" />;
+  };
 
   const recommendationSections = useMemo(() => {
     const sections = {
@@ -232,10 +315,10 @@ function PatientPortalPage({ section = "home" }) {
       );
     }
 
-    if (pendingQuestionnaires.length) {
+    if (openAssignmentsCount) {
       addUnique(
         sections.monitor,
-        t("patientPortal.recommendations.pendingQuestionnaires", { count: pendingQuestionnaires.length })
+        t("patientPortal.recommendations.pendingAssignments", { count: openAssignmentsCount })
       );
     }
     if (!assessments.length) {
@@ -257,26 +340,30 @@ function PatientPortalPage({ section = "home" }) {
     if (!sections.contact.length) addUnique(sections.contact, t("patientPortal.recommendations.defaultContact"));
 
     return sections;
-  }, [doctorOrder?.order_text, labRows, riskProfile, pendingQuestionnaires.length, assessments.length, patient?.next_visit_date, t]);
+  }, [doctorOrder?.order_text, labRows, riskProfile, openAssignmentsCount, assessments.length, patient?.next_visit_date, t]);
 
   const statusItems = useMemo(() => {
     const items = [];
     if (hasRecommendations) items.push(t("patientPortal.status.newRecommendations"));
-    if (!assessments.length) items.push(t("patientPortal.status.questionnairePending"));
+    if (openAssignmentsCount) {
+      items.push(t("patientPortal.status.questionnaireAssignedPending"));
+    } else if (!assessments.length) {
+      items.push(t("patientPortal.status.questionnairePending"));
+    }
     if (hasUpcomingVisit) items.push(t("patientPortal.status.upcomingVisit", { date: patient?.next_visit_date }));
     if (!items.length) items.push(t("patientPortal.status.noNewNotifications"));
     return items;
-  }, [hasRecommendations, assessments.length, hasUpcomingVisit, patient?.next_visit_date, t]);
+  }, [hasRecommendations, assessments.length, hasUpcomingVisit, patient?.next_visit_date, openAssignmentsCount, t]);
 
   const todoItems = useMemo(() => {
     const items = [];
-    if (!assessments.length) items.push(t("patientPortal.todo.takeQuestionnaire"));
+    if (openAssignmentsCount) items.push(t("patientPortal.todo.takeAssignedQuestionnaire"));
     if (hasRecommendations) items.push(t("patientPortal.todo.reviewRecommendations"));
     if (latestLabDate) items.push(t("patientPortal.todo.reviewLabs", { date: latestLabDate }));
     if (hasUpcomingVisit) items.push(t("patientPortal.todo.prepareVisit", { date: patient?.next_visit_date }));
     if (!items.length) items.push(t("patientPortal.todo.noActions"));
     return items;
-  }, [assessments.length, hasRecommendations, latestLabDate, hasUpcomingVisit, patient?.next_visit_date, t]);
+  }, [openAssignmentsCount, hasRecommendations, latestLabDate, hasUpcomingVisit, patient?.next_visit_date, t]);
 
   if (loading) {
     return (
@@ -402,49 +489,214 @@ function PatientPortalPage({ section = "home" }) {
 
       {section === "questionnaires" && (
         <Stack spacing={2}>
-          <Card><CardContent>
-            <Typography variant="h6" sx={{ mb: 1 }}>{t("patientPortal.questionnaires.completedTitle")}</Typography>
-            {!assessments.length ? <Typography color="text.secondary">{t("patientPortal.noAssessments")}</Typography> : (
-              <List>
-                {assessments.map((a) => (
-                  <ListItem key={a.id} divider secondaryAction={<Chip size="small" variant="outlined" label={t("patientPortal.questionnaires.completedStatus")} />}>
-                    <ListItemText
-                      primary={a.questionnaire_title || "-"}
-                      secondary={`${t("patientPortal.questionnaires.completedAt")}: ${a.created_at || "-"}`}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </CardContent></Card>
-          <Card><CardContent>
-            <Typography variant="h6" sx={{ mb: 1 }}>{t("patientPortal.questionnaires.pendingTitle")}</Typography>
-            {!pendingQuestionnaires.length ? <Typography color="text.secondary">{t("patientPortal.questionnaires.noPending")}</Typography> : (
-              <List>
-                {pendingQuestionnaires.map((q) => (
-                  <ListItem
-                    key={q.id}
-                    divider
-                    secondaryAction={
-                      <Button size="small" variant="outlined">
-                        {t("patientPortal.questionnaires.takeButton")}
-                      </Button>
-                    }
-                  >
-                    <ListItemText
-                      primary={q.title || q.title_ru || q.title_kk || q.title_en || "-"}
-                      secondary={t("patientPortal.questionnaires.pendingStatus")}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </CardContent></Card>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 0.5 }}>
+                {t("patientPortal.questionnaires.availableTitle")}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                {t("patientPortal.questionnaires.availableSubtitle")}
+              </Typography>
+              {!ongoingAssignments.length ? (
+                <Typography color="text.secondary">{t("patientPortal.questionnaires.noAssigned")}</Typography>
+              ) : (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>{t("patientPortal.questionnaires.columnQuestionnaire")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.assignedOn")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.due")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.columnStatus")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.doctorNote")}</TableCell>
+                      <TableCell align="right">{t("patientPortal.questionnaires.columnAction")}</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {ongoingAssignments.map((row) => {
+                      const statusAllowsTake = row.status === "assigned" || row.status === "in_progress";
+                      const canTake = statusAllowsTake && !isAssignmentDuePast(row.due_date);
+                      const takeHref =
+                        patientId && row.questionnaire != null
+                          ? `/patient/questionnaires/${patientId}/${row.questionnaire}`
+                          : "#";
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            {row.questionnaire_title ||
+                              t("detail.questionnaireFallback", { id: row.questionnaire })}
+                          </TableCell>
+                          <TableCell>{formatPortalDateTime(row.assigned_at)}</TableCell>
+                          <TableCell>{formatPortalDateOnly(row.due_date)}</TableCell>
+                          <TableCell>{assignmentOngoingStatusChip(row)}</TableCell>
+                          <TableCell sx={{ maxWidth: 200, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                            {(row.note || "").trim() ? row.note : "—"}
+                          </TableCell>
+                          <TableCell align="right">
+                            {canTake ? (
+                              <Button component={Link} to={takeHref} size="small" variant="contained">
+                                {t("patientPortal.questionnaires.takeButton")}
+                              </Button>
+                            ) : statusAllowsTake && isAssignmentDuePast(row.due_date) ? (
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ maxWidth: 220 }}>
+                                {t("patientPortal.questionnaires.takeDisabledExpired")}
+                              </Typography>
+                            ) : row.status === "expired" ? (
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ maxWidth: 220 }}>
+                                {t("patientPortal.questionnaires.takeDisabledExpired")}
+                              </Typography>
+                            ) : row.status === "cancelled" ? (
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ maxWidth: 220 }}>
+                                {t("patientPortal.questionnaires.takeDisabledCancelled")}
+                              </Typography>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent>
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                {t("patientPortal.questionnaires.completedAssignmentsTitle")}
+              </Typography>
+              {!completedAssignments.length ? (
+                <Typography color="text.secondary">{t("patientPortal.questionnaires.noCompletedAssignments")}</Typography>
+              ) : (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>{t("patientPortal.questionnaires.columnQuestionnaire")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.assignedOn")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.due")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.columnCompletedAt")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.columnStatus")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.columnSummary")}</TableCell>
+                      <TableCell>{t("patientPortal.questionnaires.doctorNote")}</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {completedAssignments.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell sx={{ fontWeight: 600 }}>
+                          {row.questionnaire_title ||
+                            t("detail.questionnaireFallback", { id: row.questionnaire })}
+                        </TableCell>
+                        <TableCell>{formatPortalDateTime(row.assigned_at)}</TableCell>
+                        <TableCell>{formatPortalDateOnly(row.due_date)}</TableCell>
+                        <TableCell>
+                          {formatPortalDateTime(row.completed_at || row.assessment_summary?.created_at)}
+                        </TableCell>
+                        <TableCell>
+                          <Chip size="small" label={assignmentStatusLabel(row)} color="success" variant="outlined" />
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 260 }}>
+                          {row.assessment_summary?.id && patientId ? (
+                            <Stack spacing={0.75} alignItems="flex-start">
+                              <Typography variant="body2" color="text.secondary">
+                                {localizedAssignmentSummaryPreview(t, row.assessment_summary) || "—"}
+                              </Typography>
+                              <Button
+                                component={Link}
+                                size="small"
+                                variant="text"
+                                to={`/patient/assessments/${patientId}/${row.assessment_summary.id}`}
+                              >
+                                {t("patientPortal.questionnaires.viewFullResult")}
+                              </Button>
+                            </Stack>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              {localizedAssignmentSummaryPreview(t, row.assessment_summary) || "—"}
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 200, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                          {(row.note || "").trim() ? row.note : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
+                {t("patientPortal.questionnaires.completedAssignmentFootnote")}
+              </Typography>
+            </CardContent>
+          </Card>
+
+          {assessments.length > 0 ? (
+            <Card>
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                  {t("patientPortal.questionnaires.allResultsTitle")}
+                </Typography>
+                <List dense>
+                  {assessments.map((a) => (
+                    <ListItem key={a.id} divider>
+                      <ListItemText
+                        primary={a.questionnaire_title || "-"}
+                        secondary={`${t("patientPortal.questionnaires.completedAt")}: ${a.created_at || "-"}`}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </CardContent>
+            </Card>
+          ) : null}
         </Stack>
       )}
 
       {section === "recommendations" && (
         <Stack spacing={2}>
+          {engineRecommendations ? (
+            <Card>
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                  {t("patientPortal.recommendations.engineSummaryTitle")}
+                </Typography>
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", mb: 1 }}>
+                  <Chip
+                    size="small"
+                    label={`${t("patientPortal.recommendations.engineOverallStatus")}: ${engineRecommendations.overall_status || "—"}`}
+                    color={
+                      engineRecommendations.overall_status === "urgent_review"
+                        ? "error"
+                        : engineRecommendations.overall_status === "elevated_risk"
+                          ? "warning"
+                          : "default"
+                    }
+                  />
+                </Stack>
+                {engineRecommendations.overall_status_patient_ru ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    {engineRecommendations.overall_status_patient_ru}
+                  </Typography>
+                ) : null}
+                {Array.isArray(engineRecommendations.red_flags) && engineRecommendations.red_flags.length ? (
+                  <Alert severity="warning" sx={{ mb: 1 }}>
+                    <Typography variant="subtitle2">{t("patientPortal.recommendations.engineRedFlags")}</Typography>
+                    <List dense>
+                      {engineRecommendations.red_flags.slice(0, 5).map((rf, idx) => (
+                        <ListItem key={rf.source_item_id || idx} disableGutters>
+                          <ListItemText primary={rf.title} secondary={(rf.patient_summary || "").slice(0, 240)} />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Alert>
+                ) : null}
+                <Typography variant="caption" color="text.secondary">
+                  {t("patientPortal.recommendations.engineDisclaimer")}
+                </Typography>
+              </CardContent>
+            </Card>
+          ) : null}
           <Card><CardContent>
             <Typography variant="h6" sx={{ mb: 1 }}>{t("patientPortal.menu.recommendations")}</Typography>
             <Typography color="text.secondary">{t("patientPortal.recommendations.subtitle")}</Typography>

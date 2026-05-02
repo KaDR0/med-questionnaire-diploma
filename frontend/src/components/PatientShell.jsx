@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
 import LogoLockup from "./brand/LogoLockup";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 const patientNav = [
   { id: "home", labelKey: "patientPortal.menu.home", to: "/patient" },
@@ -72,6 +73,10 @@ function PatientShell({ children }) {
             );
           })}
         </Stack>
+
+        <Divider sx={{ borderColor: "divider" }} />
+        <LanguageSwitcher fullWidth showLabel size="small" />
+
         <Box sx={{ mt: "auto", pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
             {t("patientPortal.welcome")}: {user?.first_name || user?.username}

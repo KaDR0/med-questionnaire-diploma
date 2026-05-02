@@ -57,9 +57,9 @@ function DashboardPage() {
       questionnaire_approved: t("dashboard.activityMap.questionnaireApproved", { id: byId }),
       questionnaire_rejected: t("dashboard.activityMap.questionnaireRejected", { id: byId }),
       questionnaire_changes_requested: t("dashboard.activityMap.questionnaireChangesRequested", { id: byId }),
-      questionnaire_session_created: t("dashboard.activityMap.questionnaireSessionCreated", { patientId: patientRef }),
+      questionnaire_session_created: t("dashboard.activityMap.legacyAuditEntry", { patientId: patientRef }),
       assessment_submitted: t("dashboard.activityMap.assessmentSubmitted", { patientId: patientRef }),
-      public_questionnaire_completed: t("dashboard.activityMap.publicQuestionnaireCompleted", { patientId: patientRef }),
+      public_questionnaire_completed: t("dashboard.activityMap.legacyAuditEntry", { patientId: patientRef }),
     };
 
     return labels[action] || t("dashboard.activityMap.defaultAction");

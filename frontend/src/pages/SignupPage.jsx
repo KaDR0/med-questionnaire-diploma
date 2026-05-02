@@ -10,15 +10,13 @@ import {
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import LogoLockup from "../components/brand/LogoLockup";
+import AuthScaffold from "../components/AuthScaffold";
 
 function SignupPage() {
   const { t } = useTranslation();
 
   return (
-    <Box
-      className="mq-workspace-bg"
-      sx={{ minHeight: "100vh", display: "flex", alignItems: "center", py: 6 }}
-    >
+    <AuthScaffold sx={{ display: "flex", alignItems: "center", py: 6 }}>
       <Container maxWidth="sm" sx={{ width: "100%" }}>
         <Box sx={{ display: "flex", justifyContent: "center", mb: 3 }} className="mq-animate-fade-up">
           <LogoLockup variant="hero" disableLink caption="brand" animatedCaption />
@@ -51,7 +49,7 @@ function SignupPage() {
           </CardContent>
         </Card>
       </Container>
-    </Box>
+    </AuthScaffold>
   );
 }
 

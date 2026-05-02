@@ -1,5 +1,4 @@
 from datetime import date, timedelta
-import secrets
 
 from django.http import FileResponse
 from django.contrib.auth.models import User
@@ -10,8 +9,7 @@ from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError as ApiValidationError
 
 from .models import (
     Disease,
@@ -27,10 +25,12 @@ from .models import (
     LabValue,
     PatientNote,
     PatientRiskProfile,
-    QuestionnaireSession,
+    QuestionnaireAssignment,
     AuditLog,
     DoctorProfile,
 )
+from .lab_recommendation_engine import build_lab_recommendation_bundle
+from .patient_recommendation_engine import build_full_patient_recommendation_bundle
 from .serializers import (
     DoctorOrderRevisionSerializer,
     DoctorOrderSerializer,
@@ -47,8 +47,8 @@ from .serializers import (
     PatientNoteSerializer,
     PatientNoteCreateUpdateSerializer,
     PatientRiskProfileSerializer,
-    QuestionnaireSessionCreateSerializer,
-    QuestionnaireSessionSerializer,
+    QuestionnaireAssignmentSerializer,
+    QuestionnaireAssignmentCreateSerializer,
 )
 from .services import (
     build_assessment_pdf,
@@ -62,7 +62,13 @@ from .services import (
 )
 from .risk_engine import calculate_and_store_risk_profile
 from .patient_clinical_status import refresh_patient_clinical_status
-from .permissions import IsDoctorOrAbove, IsChiefDoctorOrAdmin, get_user_role
+from .permissions import (
+    IsDoctorOrAbove,
+    IsChiefDoctorOrAdmin,
+    IsPatient,
+    get_user_role,
+    permitted_patients_queryset,
+)
 
 
 def _client_ip(request):
@@ -84,22 +90,80 @@ def _audit(request, action, object_type, object_id="", details=None):
 
 
 def _permitted_patient_queryset(request):
+    return permitted_patients_queryset(request)
+
+
+def _questionnaire_assignment_queryset(request):
+    """Assignments visible to the current user (chief: all; doctor: patients they own)."""
     role = get_user_role(request.user)
-    queryset = Patient.objects.all()
-    if role == DoctorProfile.ROLE_PATIENT:
-        return queryset.filter(user=request.user)
+    base = QuestionnaireAssignment.objects.select_related(
+        "patient", "questionnaire", "assigned_by", "result_assessment"
+    ).order_by("-assigned_at")
+    if role == DoctorProfile.ROLE_CHIEF_DOCTOR:
+        return base
     if role == DoctorProfile.ROLE_DOCTOR:
-        return queryset.filter(
-            models.Q(assigned_doctor=request.user)
-            | models.Q(created_by=request.user)
+        return base.filter(
+            models.Q(patient__assigned_doctor=request.user)
+            | models.Q(patient__created_by=request.user)
         )
-    if role == DoctorProfile.ROLE_PENDING:
-        return queryset.none()
+    return QuestionnaireAssignment.objects.none()
+
+
+_ASSIGNMENT_SCOPE_ALLOWED = frozenset(
+    {"", "all", "active", "completed", "expired", "cancelled", "in_progress"}
+)
+
+
+def _questionnaire_assignments_scope_filter(queryset, scope):
+    """Filter assignments by lifecycle bucket (?scope=)."""
+    if scope is None:
+        return queryset
+    s = (scope or "").strip().lower()
+    if s not in _ASSIGNMENT_SCOPE_ALLOWED:
+        raise ApiValidationError(
+            {
+                "scope": (
+                    "Invalid value. Use: all, active, completed, expired, cancelled, in_progress "
+                    "(optional; default all)."
+                )
+            }
+        )
+    if s in ("", "all"):
+        return queryset
+    if s == "active":
+        return queryset.filter(status__in=QuestionnaireAssignment.ACTIVE_STATUSES)
+    if s == "completed":
+        return queryset.filter(status=QuestionnaireAssignment.STATUS_COMPLETED)
+    if s == "expired":
+        return queryset.filter(status=QuestionnaireAssignment.STATUS_EXPIRED)
+    if s == "cancelled":
+        return queryset.filter(status=QuestionnaireAssignment.STATUS_CANCELLED)
+    if s == "in_progress":
+        return queryset.filter(status=QuestionnaireAssignment.STATUS_IN_PROGRESS)
     return queryset
 
 
 def _get_permitted_patient_or_404(request, patient_id):
     return generics.get_object_or_404(_permitted_patient_queryset(request), pk=patient_id)
+
+
+def _permitted_assessment_queryset(request):
+    """
+    Assessments the current user may read (detail / PDF / risk).
+    Scope matches AssessmentDetailAPIView — must stay in sync for no URL leaks.
+    """
+    role = get_user_role(request.user)
+    queryset = Assessment.objects.all()
+    if role == DoctorProfile.ROLE_PATIENT:
+        return queryset.filter(patient__user=request.user)
+    if role == DoctorProfile.ROLE_DOCTOR:
+        return queryset.filter(
+            models.Q(patient__assigned_doctor=request.user)
+            | models.Q(patient__created_by=request.user)
+        )
+    if role == DoctorProfile.ROLE_PENDING:
+        return queryset.none()
+    return queryset
 
 
 class PatientListAPIView(generics.ListCreateAPIView):
@@ -332,22 +396,10 @@ class PatientAssessmentTrendAPIView(APIView):
 
 
 class AssessmentDetailAPIView(generics.RetrieveAPIView):
-    queryset = Assessment.objects.all()
     serializer_class = AssessmentSerializer
 
     def get_queryset(self):
-        role = get_user_role(self.request.user)
-        queryset = Assessment.objects.all()
-        if role == DoctorProfile.ROLE_PATIENT:
-            return queryset.filter(patient__user=self.request.user)
-        if role == DoctorProfile.ROLE_DOCTOR:
-            return queryset.filter(
-                models.Q(patient__assigned_doctor=self.request.user)
-                | models.Q(patient__created_by=self.request.user)
-            )
-        if role == DoctorProfile.ROLE_PENDING:
-            return queryset.none()
-        return queryset
+        return _permitted_assessment_queryset(self.request)
 
 
 class PatientRiskProfileAPIView(APIView):
@@ -411,8 +463,7 @@ class PatientRiskHistoryAPIView(APIView):
 
 class AssessmentRiskProfileAPIView(APIView):
     def get(self, request, pk):
-        assessment = generics.get_object_or_404(Assessment, pk=pk)
-        _get_permitted_patient_or_404(request, assessment.patient_id)
+        assessment = generics.get_object_or_404(_permitted_assessment_queryset(request), pk=pk)
         profile = (
             PatientRiskProfile.objects.filter(patient_id=assessment.patient_id)
             .prefetch_related("findings__recommendation_template", "red_flags")
@@ -428,10 +479,11 @@ class AssessmentRiskProfileAPIView(APIView):
 class AssessmentPdfAPIView(APIView):
     def get(self, request, pk):
         assessment = generics.get_object_or_404(
-            Assessment.objects.select_related("patient", "questionnaire", "doctor").prefetch_related("answers__question"),
+            _permitted_assessment_queryset(request)
+            .select_related("patient", "questionnaire", "doctor")
+            .prefetch_related("answers__question"),
             pk=pk,
         )
-        _get_permitted_patient_or_404(request, assessment.patient_id)
         pdf_file = build_assessment_pdf(assessment)
         return FileResponse(
             pdf_file,
@@ -525,6 +577,22 @@ class PatientLabTrendAPIView(APIView):
                 },
             }
         )
+
+
+class PatientLabRecommendationsAPIView(APIView):
+    """Structured lab-based recommendations (non-diagnostic); permissions match patient lab APIs."""
+
+    def get(self, request, patient_id):
+        patient = _get_permitted_patient_or_404(request, patient_id)
+        return Response(build_lab_recommendation_bundle(patient))
+
+
+class PatientRecommendationsAPIView(APIView):
+    """Lab + questionnaire recommendation layers merged (same item schema as lab items)."""
+
+    def get(self, request, patient_id):
+        patient = _get_permitted_patient_or_404(request, patient_id)
+        return Response(build_full_patient_recommendation_bundle(patient))
 
 
 class LabIndicatorListAPIView(APIView):
@@ -854,18 +922,106 @@ class LabImportAPIView(APIView):
 class SubmitAssessmentAPIView(APIView):
     def post(self, request):
         role = get_user_role(request.user)
-        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
-            raise PermissionDenied("Only medical staff can submit assessments.")
         patient_id = request.data.get("patient_id")
         questionnaire_id = request.data.get("questionnaire_id")
         answers = request.data.get("answers", {})
-        doctor_id = request.user.id if request.user.is_authenticated else request.data.get("doctor_id")
 
         if not patient_id or not questionnaire_id:
             return Response(
                 {"error": "patient_id and questionnaire_id are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Patient: only own card + must have an active doctor assignment for this questionnaire.
+        if role == DoctorProfile.ROLE_PATIENT:
+            try:
+                patient = _permitted_patient_queryset(request).get(id=patient_id)
+            except Patient.DoesNotExist:
+                return Response(
+                    {"error": "Patient not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            try:
+                questionnaire = Questionnaire.objects.get(id=questionnaire_id)
+            except Questionnaire.DoesNotExist:
+                return Response(
+                    {"error": "Questionnaire not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            with transaction.atomic():
+                assignment = (
+                    QuestionnaireAssignment.objects.select_for_update()
+                    .filter(
+                        patient=patient,
+                        questionnaire=questionnaire,
+                        status__in=QuestionnaireAssignment.ACTIVE_STATUSES,
+                    )
+                    .first()
+                )
+                if not assignment:
+                    return Response(
+                        {
+                            "error": (
+                                "No active assignment for this questionnaire. "
+                                "Ask your doctor to assign it in your chart."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # Terminal statuses (completed / cancelled / expired) are excluded by ACTIVE_STATUSES.
+                # Also block submission when due_date has passed but status was not yet updated to expired.
+                today = timezone.localdate()
+                if assignment.due_date and assignment.due_date < today:
+                    return Response(
+                        {
+                            "error": (
+                                "The due date for this questionnaire assignment has passed. "
+                                "Contact your doctor if you still need to complete it."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                assessment = calculate_and_save_assessment(
+                    patient=patient,
+                    questionnaire=questionnaire,
+                    answers=answers,
+                    doctor=None,
+                )
+                if assessment.patient_id != assignment.patient_id or assessment.questionnaire_id != assignment.questionnaire_id:
+                    return Response(
+                        {"error": "Assessment did not match the active assignment context."},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+                now = timezone.now()
+                assignment.status = QuestionnaireAssignment.STATUS_COMPLETED
+                assignment.completed_at = now
+                assignment.result_assessment = assessment
+                assignment.save(
+                    update_fields=["status", "completed_at", "result_assessment", "updated_at"]
+                )
+            calculate_and_store_risk_profile(patient.id)
+            _audit(
+                request,
+                "assessment_submitted",
+                "Assessment",
+                assessment.id,
+                {"patient_id": patient.id, "questionnaire_id": questionnaire.id, "via": "patient_assignment"},
+            )
+            return Response(
+                {
+                    "message": "Assessment submitted successfully",
+                    "assessment_id": assessment.id,
+                    "assignment_id": assignment.id,
+                    "total_score": assessment.total_score,
+                    "conclusion": assessment.conclusion,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        if role not in {DoctorProfile.ROLE_DOCTOR, DoctorProfile.ROLE_CHIEF_DOCTOR}:
+            raise PermissionDenied("Only medical staff can submit assessments.")
+
+        doctor_id = request.user.id if request.user.is_authenticated else request.data.get("doctor_id")
 
         try:
             patient = _permitted_patient_queryset(request).get(id=patient_id)
@@ -881,29 +1037,66 @@ class SubmitAssessmentAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        assessment = calculate_and_save_assessment(
-            patient=patient,
-            questionnaire=questionnaire,
-            answers=answers,
-            doctor=doctor_id,
-        )
+        with transaction.atomic():
+            assignment = (
+                QuestionnaireAssignment.objects.select_for_update()
+                .filter(
+                    patient=patient,
+                    questionnaire=questionnaire,
+                    status__in=QuestionnaireAssignment.ACTIVE_STATUSES,
+                )
+                .first()
+            )
+            assessment = calculate_and_save_assessment(
+                patient=patient,
+                questionnaire=questionnaire,
+                answers=answers,
+                doctor=doctor_id,
+            )
+            if assignment:
+                now = timezone.now()
+                assignment.status = QuestionnaireAssignment.STATUS_COMPLETED
+                assignment.completed_at = now
+                assignment.result_assessment = assessment
+                assignment.save(
+                    update_fields=["status", "completed_at", "result_assessment", "updated_at"]
+                )
         calculate_and_store_risk_profile(patient.id)
         _audit(
             request,
             "assessment_submitted",
             "Assessment",
             assessment.id,
-            {"patient_id": patient.id, "questionnaire_id": questionnaire.id},
+            {
+                "patient_id": patient.id,
+                "questionnaire_id": questionnaire.id,
+                "via": "doctor_assignment" if assignment else "doctor_manual",
+            },
         )
 
         return Response(
             {
                 "message": "Assessment submitted successfully",
                 "assessment_id": assessment.id,
+                "assignment_id": assignment.id if assignment else None,
                 "total_score": assessment.total_score,
                 "conclusion": assessment.conclusion,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class MyQuestionnaireAssignmentsAPIView(generics.ListAPIView):
+    """Authenticated patient: assignments for their linked patient card only."""
+
+    permission_classes = [IsPatient]
+    serializer_class = QuestionnaireAssignmentSerializer
+
+    def get_queryset(self):
+        return (
+            QuestionnaireAssignment.objects.filter(patient__user=self.request.user)
+            .select_related("patient", "questionnaire", "assigned_by", "result_assessment")
+            .order_by("-assigned_at")
         )
 
 
@@ -1095,104 +1288,6 @@ class RequestQuestionnaireChangesAPIView(APIView):
         return Response({"detail": "Changes requested."})
 
 
-class QuestionnaireSessionCreateAPIView(APIView):
-    permission_classes = [IsDoctorOrAbove]
-
-    def post(self, request):
-        serializer = QuestionnaireSessionCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        patient_id = serializer.validated_data["patient_id"]
-        questionnaire_id = serializer.validated_data["questionnaire_id"]
-        questionnaire = generics.get_object_or_404(Questionnaire, pk=questionnaire_id)
-        if not questionnaire.is_active or questionnaire.approval_status != Questionnaire.APPROVAL_APPROVED:
-            return Response({"detail": "Questionnaire is not approved for patient use."}, status=400)
-        patient = _get_permitted_patient_or_404(request, patient_id)
-        expires_at = timezone.now() + timedelta(hours=24)
-        session = QuestionnaireSession.objects.create(
-            patient=patient,
-            questionnaire=questionnaire,
-            doctor=request.user,
-            token=secrets.token_urlsafe(32),
-            expires_at=expires_at,
-        )
-        _audit(request, "questionnaire_session_created", "QuestionnaireSession", session.id, {"patient_id": patient_id})
-        return Response(
-            {
-                "id": session.id,
-                "public_url": f"/public/questionnaire/{session.token}",
-                "token": session.token,
-                "expires_at": session.expires_at,
-                "questionnaire_title": questionnaire.title_en or questionnaire.title_ru or questionnaire.title_kk or questionnaire.title,
-                "patient_display": patient.patient_code or f"Patient #{patient.id}",
-            },
-            status=201,
-        )
-
-
-class PublicQuestionnaireAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    def get(self, request, token):
-        session = generics.get_object_or_404(
-            QuestionnaireSession.objects.select_related("questionnaire"),
-            token=token,
-        )
-        if session.status == QuestionnaireSession.STATUS_COMPLETED:
-            return Response({"detail": "Ссылка уже использована.", "code": "used"}, status=400)
-        if session.expires_at < timezone.now():
-            session.status = QuestionnaireSession.STATUS_EXPIRED
-            session.save(update_fields=["status"])
-            return Response({"detail": "Срок действия ссылки истек.", "code": "expired"}, status=400)
-        questionnaire = session.questionnaire
-        questions = Question.objects.filter(questionnaire=questionnaire).order_by("order")
-        return Response(
-            {
-                "title": questionnaire.title_en or questionnaire.title_ru or questionnaire.title_kk or questionnaire.title,
-                "description": questionnaire.description_en or questionnaire.description_ru or questionnaire.description_kk or questionnaire.description,
-                "token": session.token,
-                "expires_at": session.expires_at,
-                "questions": QuestionSerializer(questions, many=True).data,
-                "screening_disclaimer": "This tool is for screening and educational purposes only. Final diagnosis must be made by a qualified doctor.",
-            }
-        )
-
-
-class PublicQuestionnaireSubmitAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request, token):
-        session = generics.get_object_or_404(
-            QuestionnaireSession.objects.select_related("questionnaire", "patient", "doctor"),
-            token=token,
-        )
-        if session.status == QuestionnaireSession.STATUS_COMPLETED:
-            return Response({"detail": "Ответы уже отправлены по этой ссылке.", "code": "used"}, status=400)
-        if session.expires_at < timezone.now():
-            session.status = QuestionnaireSession.STATUS_EXPIRED
-            session.save(update_fields=["status"])
-            return Response({"detail": "Срок действия ссылки истек.", "code": "expired"}, status=400)
-        answers = request.data.get("answers", {})
-        assessment = calculate_and_save_assessment(
-            patient=session.patient,
-            questionnaire=session.questionnaire,
-            answers=answers,
-            doctor=session.doctor.id if session.doctor else None,
-        )
-        calculate_and_store_risk_profile(session.patient_id)
-        session.status = QuestionnaireSession.STATUS_COMPLETED
-        session.completed_at = timezone.now()
-        session.used_at = timezone.now()
-        session.save(update_fields=["status", "completed_at", "used_at"])
-        _audit(
-            request,
-            "public_questionnaire_completed",
-            "QuestionnaireSession",
-            session.id,
-            {"assessment_id": assessment.id, "patient_id": session.patient_id},
-        )
-        return Response({"detail": "Спасибо, ваши ответы отправлены врачу.", "assessment_id": assessment.id}, status=201)
-
-
 class DashboardStatsAPIView(APIView):
     def get(self, request):
         patient_queryset = _permitted_patient_queryset(request)
@@ -1334,16 +1429,82 @@ class AssignUserRoleAPIView(APIView):
         )
 
 
-class QuestionnaireSessionListAPIView(generics.ListAPIView):
-    serializer_class = QuestionnaireSessionSerializer
+class QuestionnaireAssignmentListCreateAPIView(generics.ListCreateAPIView):
+    """
+    GET: list assignments (optional ?patient_id=&scope=).
+    POST: create assignment (body: patient_id, questionnaire_id, optional due_date, comment).
+    Only doctor/chief_doctor (IsDoctorOrAbove). Patients and pending users are denied at permission layer.
+    """
+
+    permission_classes = [IsDoctorOrAbove]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return QuestionnaireAssignmentCreateSerializer
+        return QuestionnaireAssignmentSerializer
 
     def get_queryset(self):
-        queryset = QuestionnaireSession.objects.select_related("patient", "questionnaire", "doctor").order_by("-created_at")
-        role = get_user_role(self.request.user)
-        if role == DoctorProfile.ROLE_PATIENT:
-            return queryset.filter(patient__user=self.request.user)
-        if role == DoctorProfile.ROLE_DOCTOR:
-            return queryset.filter(doctor=self.request.user)
-        if role == DoctorProfile.ROLE_PENDING:
-            return queryset.none()
-        return queryset
+        qs = _questionnaire_assignment_queryset(self.request)
+        patient_id_raw = self.request.query_params.get("patient_id")
+        if patient_id_raw not in (None, ""):
+            try:
+                pid = int(patient_id_raw)
+            except (TypeError, ValueError):
+                raise ApiValidationError({"patient_id": "Invalid patient id."})
+            # Same patient scope as list API — doctors cannot filter by another patient's id (404).
+            generics.get_object_or_404(permitted_patients_queryset(self.request), pk=pid)
+            qs = qs.filter(patient_id=pid)
+        return _questionnaire_assignments_scope_filter(qs, self.request.query_params.get("scope"))
+
+    def create(self, request, *args, **kwargs):
+        serializer = QuestionnaireAssignmentCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        return Response(
+            QuestionnaireAssignmentSerializer(instance, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PatientQuestionnaireAssignmentListAPIView(generics.ListAPIView):
+    """
+    GET assignments for one patient. Requires access to that patient.
+    Query: ?scope=active|completed|expired|cancelled|in_progress|all
+    """
+
+    permission_classes = [IsDoctorOrAbove]
+    serializer_class = QuestionnaireAssignmentSerializer
+
+    def get_queryset(self):
+        patient_id = self.kwargs["patient_id"]
+        _get_permitted_patient_or_404(self.request, patient_id)
+        qs = _questionnaire_assignment_queryset(self.request).filter(patient_id=patient_id)
+        return _questionnaire_assignments_scope_filter(qs, self.request.query_params.get("scope"))
+
+
+class QuestionnaireAssignmentDetailAPIView(generics.RetrieveUpdateAPIView):
+    permission_classes = [IsDoctorOrAbove]
+    serializer_class = QuestionnaireAssignmentSerializer
+
+    def get_queryset(self):
+        return _questionnaire_assignment_queryset(self.request)
+
+
+class QuestionnaireAssignmentCancelAPIView(APIView):
+    """POST — set status to cancelled (only from assigned or in_progress)."""
+
+    permission_classes = [IsDoctorOrAbove]
+
+    def post(self, request, pk):
+        assignment = generics.get_object_or_404(_questionnaire_assignment_queryset(request), pk=pk)
+        if assignment.status not in QuestionnaireAssignment.CANCELLABLE_STATUSES:
+            return Response(
+                {
+                    "detail": "Only assigned or in-progress assignments can be cancelled; "
+                    "completed, expired, and cancelled assignments cannot be cancelled again."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        assignment.status = QuestionnaireAssignment.STATUS_CANCELLED
+        assignment.save(update_fields=["status", "updated_at"])
+        return Response(QuestionnaireAssignmentSerializer(assignment, context={"request": request}).data)

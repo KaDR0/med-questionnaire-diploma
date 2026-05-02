@@ -34,11 +34,13 @@ import {
   DialogActions,
   List,
   ListItemButton,
+  ListItem,
   ListItemText,
 } from "@mui/material";
 import { useTheme, alpha } from "@mui/material/styles";
 import MedicalLineChart from "../components/charts/MedicalLineChart";
 import RiskTimelineChart from "../components/charts/RiskTimelineChart";
+import PatientQuestionnaireAssignmentsCard from "../components/patient/PatientQuestionnaireAssignmentsCard";
 
 function PatientDetailPage() {
   const { id } = useParams();
@@ -120,6 +122,7 @@ function PatientDetailPage() {
     temperature: "",
   });
   const [expandedLabSets, setExpandedLabSets] = useState({});
+  const [recommendationBundle, setRecommendationBundle] = useState(null);
   const theme = useTheme();
   const scoreSeverityColor = (score) =>
     score >= 7 ? theme.palette.error.main : score >= 4 ? theme.palette.warning.main : theme.palette.success.main;
@@ -206,6 +209,12 @@ function PatientDetailPage() {
       ...prev,
       ...intake,
     }));
+    try {
+      const recRes = await api.get(`patients/${id}/recommendations/`);
+      setRecommendationBundle(recRes.data);
+    } catch {
+      setRecommendationBundle(null);
+    }
   };
 
   useEffect(() => {
@@ -1055,6 +1064,58 @@ function PatientDetailPage() {
           </Grid>
         </Paper>
 
+        {recommendationBundle ? (
+          <Paper sx={{ p: 2.5, mb: 2.5, borderRadius: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              {t("detail.integratedRecTitle")}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {t("detail.integratedRecSubtitle")}
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: "wrap" }}>
+              <Chip
+                size="small"
+                label={`${t("detail.overallStatus")}: ${recommendationBundle.overall_status || "—"}`}
+                color={
+                  recommendationBundle.overall_status === "urgent_review"
+                    ? "error"
+                    : recommendationBundle.overall_status === "elevated_risk"
+                      ? "warning"
+                      : "default"
+                }
+              />
+              {Array.isArray(recommendationBundle.red_flags) && recommendationBundle.red_flags.length ? (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  label={t("detail.redFlagCount", { count: recommendationBundle.red_flags.length })}
+                />
+              ) : null}
+            </Stack>
+            {recommendationBundle.overall_status_patient_ru ? (
+              <Typography variant="body2" sx={{ mb: 2 }}>
+                {recommendationBundle.overall_status_patient_ru}
+              </Typography>
+            ) : null}
+            {Array.isArray(recommendationBundle.red_flags) && recommendationBundle.red_flags.length ? (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <Typography variant="subtitle2">{t("detail.engineRedFlags")}</Typography>
+                <List dense>
+                  {recommendationBundle.red_flags.slice(0, 6).map((rf, idx) => (
+                    <ListItem key={rf.source_item_id || idx} disableGutters sx={{ py: 0.25 }}>
+                      <ListItemText primary={rf.title} secondary={(rf.patient_summary || "").slice(0, 220)} />
+                    </ListItem>
+                  ))}
+                </List>
+              </Alert>
+            ) : null}
+            <Typography variant="caption" color="text.secondary">
+              {t("detail.engineDisclaimer")}
+            </Typography>
+          </Paper>
+        ) : null}
+
         <Grid container spacing={2.5}>
           <Grid item xs={12} sm={6} lg={3}>
             <Card sx={{ borderRadius: 4, boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
@@ -1309,6 +1370,8 @@ function PatientDetailPage() {
                   </Stack>
                 </CardContent>
               </Card>
+
+              <PatientQuestionnaireAssignmentsCard patientId={id} showFeedback={showFeedback} />
 
               <Card sx={{ borderRadius: 3.5 }}>
                 <CardContent sx={{ p: 3 }}>

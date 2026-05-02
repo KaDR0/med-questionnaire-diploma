@@ -1,8 +1,18 @@
+import logging
+
+from django.contrib.auth.models import User
+from django.db import transaction
+from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 
+logger = logging.getLogger(__name__)
+
+from .permissions import permitted_patients_queryset
 from .models import (
     DoctorOrder,
     DoctorOrderRevision,
+    DoctorProfile,
+    Disease,
     Patient,
     Questionnaire,
     Question,
@@ -15,8 +25,44 @@ from .models import (
     PatientRiskProfile,
     RiskFinding,
     RiskRedFlag,
-    QuestionnaireSession,
+    QuestionnaireAssignment,
 )
+
+
+def _preferred_lang(serializer_obj):
+    request = serializer_obj.context.get("request") if hasattr(serializer_obj, "context") else None
+    raw = ""
+    if request is not None:
+        raw = request.headers.get("Accept-Language", "") or ""
+    normalized = raw.split(",")[0].strip().lower()
+    if normalized.startswith("ru"):
+        return "ru"
+    if normalized.startswith("kk"):
+        return "kk"
+    return "en"
+
+
+def _localized_value(obj, base_field, lang):
+    if lang == "ru":
+        return (
+            getattr(obj, f"{base_field}_ru", None)
+            or getattr(obj, f"{base_field}_en", None)
+            or getattr(obj, f"{base_field}_kk", None)
+            or getattr(obj, base_field, None)
+        )
+    if lang == "kk":
+        return (
+            getattr(obj, f"{base_field}_kk", None)
+            or getattr(obj, f"{base_field}_en", None)
+            or getattr(obj, f"{base_field}_ru", None)
+            or getattr(obj, base_field, None)
+        )
+    return (
+        getattr(obj, f"{base_field}_en", None)
+        or getattr(obj, f"{base_field}_ru", None)
+        or getattr(obj, f"{base_field}_kk", None)
+        or getattr(obj, base_field, None)
+    )
 
 
 class PatientSerializer(serializers.ModelSerializer):
@@ -100,16 +146,24 @@ class QuestionWriteSerializer(serializers.ModelSerializer):
 
 class QuestionnaireWriteSerializer(serializers.ModelSerializer):
     questions = QuestionWriteSerializer(many=True)
+    disease_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Questionnaire
         fields = "__all__"
         read_only_fields = ["approved_by", "approved_at", "created_by", "created_at", "updated_at"]
+        extra_kwargs = {
+            "disease": {"required": False, "allow_null": True},
+        }
 
     def validate(self, attrs):
         title = (attrs.get("title") or "").strip()
         if not title:
             raise serializers.ValidationError({"title": "Title is required."})
+        disease_name = (attrs.get("disease_name") or "").strip()
+        current_disease = attrs.get("disease", getattr(self.instance, "disease", None))
+        if current_disease is None and not disease_name:
+            raise serializers.ValidationError({"disease_name": "Disease is required."})
         questions = attrs.get("questions", [])
         if not questions:
             raise serializers.ValidationError({"questions": "At least one question is required."})
@@ -120,8 +174,21 @@ class QuestionnaireWriteSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"source_url": "Source URL is required for standardized questionnaires."})
         return attrs
 
+    def _resolve_disease(self, validated_data, instance=None):
+        disease_name = (validated_data.pop("disease_name", "") or "").strip()
+        disease = validated_data.get("disease", instance.disease if instance else None)
+        if disease_name:
+            disease = Disease.objects.filter(name__iexact=disease_name).first()
+            if disease is None:
+                disease = Disease.objects.create(name=disease_name, is_active=True)
+            validated_data["disease"] = disease
+            return
+        if disease is not None:
+            validated_data["disease"] = disease
+
     def create(self, validated_data):
         questions_data = validated_data.pop("questions", [])
+        self._resolve_disease(validated_data)
         questionnaire = Questionnaire.objects.create(**validated_data)
         for question_data in questions_data:
             Question.objects.create(questionnaire=questionnaire, **question_data)
@@ -129,6 +196,7 @@ class QuestionnaireWriteSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         questions_data = validated_data.pop("questions", None)
+        self._resolve_disease(validated_data, instance=instance)
         for key, value in validated_data.items():
             setattr(instance, key, value)
         instance.save()
@@ -160,7 +228,8 @@ class AnswerSerializer(serializers.ModelSerializer):
     question_text = serializers.SerializerMethodField()
 
     def get_question_text(self, obj):
-        return obj.question.text_en or obj.question.text_ru or obj.question.text_kk or obj.question.text
+        lang = _preferred_lang(self)
+        return _localized_value(obj.question, "text", lang)
 
     class Meta:
         model = Answer
@@ -175,13 +244,8 @@ class AssessmentSerializer(serializers.ModelSerializer):
     quality_flag_label = serializers.CharField(source="get_quality_flag_display", read_only=True)
 
     def get_questionnaire_title(self, obj):
-        questionnaire = obj.questionnaire
-        return (
-            questionnaire.title_en
-            or questionnaire.title_ru
-            or questionnaire.title_kk
-            or questionnaire.title
-        )
+        lang = _preferred_lang(self)
+        return _localized_value(obj.questionnaire, "title", lang)
 
     def get_doctor_full_name(self, obj):
         if not obj.doctor:
@@ -292,6 +356,26 @@ class PatientStatusUpdateSerializer(serializers.ModelSerializer):
         model = Patient
         fields = ["next_visit_date", "age", "sex", "height_cm", "weight_kg", "email"]
 
+    def validate_email(self, value):
+        if value in (None, ""):
+            if self.instance and self.instance.user_id:
+                raise serializers.ValidationError("Email cannot be empty for a linked patient account.")
+            return value
+        normalized = str(value).strip().lower()
+        if self.instance and self.instance.user_id:
+            if User.objects.filter(email__iexact=normalized).exclude(id=self.instance.user_id).exists():
+                raise serializers.ValidationError("This email is already in use by another account.")
+        return normalized
+
+    def update(self, instance, validated_data):
+        # Keep auth.User.email in sync when staff edits Patient.email (login uses User.email).
+        new_email = validated_data.get("email", serializers.empty)
+        if new_email is not serializers.empty and instance.user_id and new_email:
+            u = instance.user
+            u.email = new_email
+            u.save(update_fields=["email"])
+        return super().update(instance, validated_data)
+
 
 class DoctorOrderSerializer(serializers.ModelSerializer):
     class Meta:
@@ -373,18 +457,165 @@ class PatientRiskProfileSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class QuestionnaireSessionCreateSerializer(serializers.Serializer):
-    patient_id = serializers.IntegerField()
-    questionnaire_id = serializers.IntegerField()
+class QuestionnaireAssignmentSerializer(serializers.ModelSerializer):
+    """Doctor-assigned questionnaires: duplicate active rows prevented by DB + validate()."""
 
-
-class QuestionnaireSessionSerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    assigned_by_username = serializers.CharField(source="assigned_by.username", read_only=True)
     questionnaire_title = serializers.SerializerMethodField()
+    assessment_summary = serializers.SerializerMethodField()
 
     def get_questionnaire_title(self, obj):
-        questionnaire = obj.questionnaire
-        return questionnaire.title_en or questionnaire.title_ru or questionnaire.title_kk or questionnaire.title
+        lang = _preferred_lang(self)
+        return _localized_value(obj.questionnaire, "title", lang)
+
+    def get_assessment_summary(self, obj):
+        a = obj.result_assessment
+        if not a:
+            return None
+        interpretation = a.interpretation if isinstance(a.interpretation, dict) else {}
+        return {
+            "id": a.id,
+            "total_score": a.total_score,
+            "conclusion": a.conclusion or "",
+            "interpretation": interpretation,
+            "created_at": a.created_at,
+        }
+
+    def validate_patient(self, value):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication required.")
+        if not permitted_patients_queryset(request).filter(pk=value.pk).exists():
+            raise serializers.ValidationError("Patient not found or access denied.")
+        return value
+
+    def validate(self, attrs):
+        instance = getattr(self, "instance", None)
+        patient = attrs.get("patient", instance.patient if instance else None)
+        questionnaire = attrs.get("questionnaire", instance.questionnaire if instance else None)
+        default_status = instance.status if instance else QuestionnaireAssignment.STATUS_ASSIGNED
+        status_val = attrs.get("status", default_status)
+        if patient is None or questionnaire is None:
+            return attrs
+        if status_val in QuestionnaireAssignment.ACTIVE_STATUSES:
+            qs = QuestionnaireAssignment.objects.filter(
+                patient=patient,
+                questionnaire=questionnaire,
+                status__in=QuestionnaireAssignment.ACTIVE_STATUSES,
+            )
+            if instance is not None:
+                qs = qs.exclude(pk=instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    "An active assignment already exists for this patient and questionnaire."
+                )
+        return attrs
 
     class Meta:
-        model = QuestionnaireSession
-        fields = "__all__"
+        model = QuestionnaireAssignment
+        fields = [
+            "id",
+            "patient",
+            "questionnaire",
+            "questionnaire_title",
+            "assigned_by",
+            "assigned_by_username",
+            "assigned_at",
+            "status",
+            "status_label",
+            "due_date",
+            "note",
+            "completed_at",
+            "result_assessment",
+            "assessment_summary",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "assigned_by",
+            "assigned_by_username",
+            "assigned_at",
+            "completed_at",
+            "result_assessment",
+            "updated_at",
+        ]
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication required.")
+        user = request.user
+        profile = getattr(user, "doctor_profile", None)
+        if not profile or profile.role not in (
+            DoctorProfile.ROLE_DOCTOR,
+            DoctorProfile.ROLE_CHIEF_DOCTOR,
+        ):
+            raise serializers.ValidationError(
+                "Only a doctor or chief doctor can assign questionnaires."
+            )
+        validated_data["assigned_by"] = user
+        return super().create(validated_data)
+
+
+class QuestionnaireAssignmentCreateSerializer(serializers.Serializer):
+    """POST body: patient_id, questionnaire_id, optional due_date and comment (stored as note)."""
+
+    patient_id = serializers.IntegerField()
+    questionnaire_id = serializers.IntegerField()
+    due_date = serializers.DateField(required=False, allow_null=True)
+    comment = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        patient = get_object_or_404(permitted_patients_queryset(request), pk=attrs["patient_id"])
+        questionnaire = get_object_or_404(Questionnaire, pk=attrs["questionnaire_id"])
+        if questionnaire.approval_status == Questionnaire.APPROVAL_ARCHIVED:
+            raise serializers.ValidationError(
+                {"questionnaire_id": "Cannot assign an archived questionnaire."}
+            )
+        if not questionnaire.is_active:
+            raise serializers.ValidationError({"questionnaire_id": "Questionnaire is not active."})
+        if (
+            QuestionnaireAssignment.objects.filter(
+                patient=patient,
+                questionnaire=questionnaire,
+                status__in=QuestionnaireAssignment.ACTIVE_STATUSES,
+            ).exists()
+        ):
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        "An active assignment already exists for this patient and questionnaire."
+                    ]
+                }
+            )
+        attrs["_patient"] = patient
+        attrs["_questionnaire"] = questionnaire
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        instance = QuestionnaireAssignment.objects.create(
+            patient=validated_data["_patient"],
+            questionnaire=validated_data["_questionnaire"],
+            assigned_by=request.user,
+            status=QuestionnaireAssignment.STATUS_ASSIGNED,
+            due_date=validated_data.get("due_date"),
+            note=validated_data.get("comment", ""),
+        )
+
+        def _notify_after_commit():
+            try:
+                from .assignment_mail import send_questionnaire_assignment_notification
+
+                send_questionnaire_assignment_notification(instance)
+            except Exception:
+                logger.exception(
+                    "Unexpected error while sending questionnaire assignment notification (assignment_id=%s)",
+                    getattr(instance, "pk", None),
+                )
+
+        # Runs after DB commit: assignment stays persisted even if mail fails or outer atomic rolls back.
+        transaction.on_commit(_notify_after_commit)
+        return instance

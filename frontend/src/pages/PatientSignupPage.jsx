@@ -4,6 +4,7 @@ import { Alert, Box, Button, Card, CardContent, Container, Stack, TextField, Typ
 import { useTranslation } from "react-i18next";
 import api from "../api/axios";
 import LogoLockup from "../components/brand/LogoLockup";
+import AuthScaffold from "../components/AuthScaffold";
 
 function PatientSignupPage() {
   const { t } = useTranslation();
@@ -113,7 +114,7 @@ function PatientSignupPage() {
   };
 
   return (
-    <Box className="mq-workspace-bg" sx={{ minHeight: "100vh", display: "flex", alignItems: "center", py: 6 }}>
+    <AuthScaffold sx={{ display: "flex", alignItems: "center", py: 6 }}>
       <Container maxWidth="sm" sx={{ width: "100%" }}>
         <Box sx={{ display: "flex", justifyContent: "center", mb: 3 }}>
           <LogoLockup variant="hero" disableLink caption="brand" animatedCaption />
@@ -151,7 +152,7 @@ function PatientSignupPage() {
           </CardContent>
         </Card>
       </Container>
-    </Box>
+    </AuthScaffold>
   );
 }
 

@@ -7,6 +7,8 @@ const REFRESH_TOKEN_KEY = "mq_refresh_token";
 
 const api = axios.create({
   baseURL,
+  // Patient trusted-device cookies (httpOnly) for password-only login after OTP once.
+  withCredentials: true,
 });
 
 let onLogout = null;
@@ -41,6 +43,10 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${access}`;
   }
+  const rawLanguage = localStorage.getItem("language") || "en";
+  const language = String(rawLanguage).split("-")[0].toLowerCase();
+  config.headers = config.headers || {};
+  config.headers["Accept-Language"] = ["ru", "kk"].includes(language) ? language : "en";
   return config;
 });
 
@@ -65,9 +71,11 @@ api.interceptors.response.use(
 
     try {
       if (!refreshPromise) {
-        refreshPromise = axios.post(`${baseURL}auth/token/refresh/`, { refresh }).finally(() => {
-          refreshPromise = null;
-        });
+        refreshPromise = axios
+          .post(`${baseURL}auth/token/refresh/`, { refresh }, { withCredentials: true })
+          .finally(() => {
+            refreshPromise = null;
+          });
       }
       const refreshResponse = await refreshPromise;
       const newAccess = refreshResponse?.data?.access;

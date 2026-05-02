@@ -17,6 +17,10 @@ import {
   Paper,
   Chip,
   Stack,
+  FormControl,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import PageHeader from "../components/ui/PageHeader";
@@ -61,6 +65,8 @@ function QuestionnaireFormPage() {
     }));
   };
 
+  const isPatientUser = user?.role === "patient";
+
   const handleSubmit = async () => {
     try {
       setSubmitError("");
@@ -69,9 +75,11 @@ function QuestionnaireFormPage() {
       const payload = {
         patient_id: Number(id),
         questionnaire_id: Number(questionnaireId),
-        doctor_id: user?.id || null,
         answers: answers,
       };
+      if (!isPatientUser) {
+        payload.doctor_id = user?.id || null;
+      }
 
       const response = await api.post("assessments/submit/", payload);
 
@@ -79,11 +87,16 @@ function QuestionnaireFormPage() {
       setSnackbarOpen(true);
 
       setTimeout(() => {
-        navigate(`/patients/${id}/assessments/${response.data.assessment_id}`);
+        if (isPatientUser) {
+          navigate("/patient/questionnaires");
+        } else {
+          navigate(`/patients/${id}/assessments/${response.data.assessment_id}`);
+        }
       }, 1200);
     } catch (error) {
       console.error("Submit error:", error);
-      setSubmitError(t("form.submitError"));
+      const apiErr = error?.response?.data?.error || error?.response?.data?.detail;
+      setSubmitError(apiErr || t("form.submitError"));
     } finally {
       setSubmitting(false);
     }
@@ -126,6 +139,31 @@ function QuestionnaireFormPage() {
           <MenuItem value="yes">{t("form.yes")}</MenuItem>
           <MenuItem value="no">{t("form.no")}</MenuItem>
         </TextField>
+      );
+    }
+
+    if (question.qtype === "single_choice") {
+      const options = Array.isArray(question.options) ? question.options : [];
+      return (
+        <FormControl component="fieldset" fullWidth>
+          <RadioGroup
+            value={value}
+            onChange={(e) => handleChange(question.id, e.target.value)}
+          >
+            {options.map((option, index) => {
+              const optionValue = String(option?.value ?? option?.text ?? index);
+              const optionLabel = option?.text || optionValue;
+              return (
+                <FormControlLabel
+                  key={`${optionValue}-${index}`}
+                  value={optionValue}
+                  control={<Radio />}
+                  label={optionLabel}
+                />
+              );
+            })}
+          </RadioGroup>
+        </FormControl>
       );
     }
 
@@ -187,7 +225,7 @@ function QuestionnaireFormPage() {
 
           <Button
             component={Link}
-            to={`/patients/${id}/questionnaires`}
+            to={isPatientUser ? "/patient/questionnaires" : `/patients/${id}/questionnaires`}
             variant="outlined"
           >
             {t("form.back")}

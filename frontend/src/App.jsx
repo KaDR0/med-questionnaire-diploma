@@ -10,8 +10,6 @@ import PatientSignupPage from "./pages/PatientSignupPage";
 import DoctorSignupPage from "./pages/DoctorSignupPage";
 import ProfilePage from "./pages/ProfilePage";
 import AboutPage from "./pages/AboutPage";
-import PublicQuestionnairePage from "./pages/PublicQuestionnairePage";
-import CreateQrQuestionnairePage from "./pages/CreateQrQuestionnairePage";
 import MyQuestionnairesPage from "./pages/MyQuestionnairesPage";
 import PendingQuestionnairesPage from "./pages/PendingQuestionnairesPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -19,9 +17,6 @@ import QuestionnaireBuilderPage from "./pages/QuestionnaireBuilderPage";
 import QuestionnaireDetailPage from "./pages/QuestionnaireDetailPage";
 import QuestionnaireReviewPage from "./pages/QuestionnaireReviewPage";
 import QuestionnaireArchivePage from "./pages/QuestionnaireArchivePage";
-import PublicQuestionnaireSuccessPage from "./pages/PublicQuestionnaireSuccessPage";
-import PublicQuestionnaireExpiredPage from "./pages/PublicQuestionnaireExpiredPage";
-import PublicQuestionnaireInvalidPage from "./pages/PublicQuestionnaireInvalidPage";
 import AuditLogPage from "./pages/AuditLogPage";
 import AwaitingApprovalPage from "./pages/AwaitingApprovalPage";
 import UserRoleManagementPage from "./pages/UserRoleManagementPage";
@@ -73,10 +68,7 @@ function AppRoutes() {
         element={isAuthenticated ? <Navigate to="/" replace /> : <DoctorSignupPage />}
       />
       <Route path="/about" element={<AboutPage />} />
-      <Route path="/public/questionnaire/:token" element={<PublicQuestionnairePage />} />
-      <Route path="/public/questionnaire/:token/success" element={<PublicQuestionnaireSuccessPage />} />
-      <Route path="/public/questionnaire/expired" element={<PublicQuestionnaireExpiredPage />} />
-      <Route path="/public/questionnaire/invalid" element={<PublicQuestionnaireInvalidPage />} />
+      <Route path="/public/questionnaire/*" element={<Navigate to="/about" replace />} />
 
       <Route
         path="/awaiting-approval"
@@ -123,6 +115,30 @@ function AppRoutes() {
             <RoleRoute allowedRoles={["patient"]}>
               <PatientShell>
                 <PatientPortalPage section="labs" />
+              </PatientShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/assessments/:id/:assessmentId"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <AssessmentResultPage />
+              </PatientShell>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/questionnaires/:id/:questionnaireId"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={["patient"]}>
+              <PatientShell>
+                <QuestionnaireFormPage />
               </PatientShell>
             </RoleRoute>
           </ProtectedRoute>
@@ -241,9 +257,7 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <RoleRoute allowedRoles={["doctor", "chief_doctor"]}>
-              <AppShell>
-                <CreateQrQuestionnairePage />
-              </AppShell>
+              <Navigate to="/patients" replace />
             </RoleRoute>
           </ProtectedRoute>
         }

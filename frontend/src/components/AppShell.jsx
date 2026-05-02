@@ -1,8 +1,9 @@
-import { Box, Button, Divider, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Box, Button, Divider, Paper, Stack, Typography } from "@mui/material";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
 import LogoLockup from "./brand/LogoLockup";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 const navByRole = {
   pending: [
@@ -12,7 +13,6 @@ const navByRole = {
   doctor: [
     { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
     { id: "patients", labelKey: "navbar.patients", to: "/patients" },
-    { id: "createQr", labelKey: "navbar.createQr", to: "/questionnaires/qr" },
     { id: "myQuestionnaires", labelKey: "navbar.myQuestionnaires", to: "/questionnaires/my" },
     { id: "profile", labelKey: "navbar.profile", to: "/profile" },
   ],
@@ -29,14 +29,10 @@ const navByRole = {
 
 function AppShell({ children }) {
   const location = useLocation();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const role = user?.role || "pending";
   const navItems = navByRole[role] || navByRole.pending;
-
-  const handleLanguageChange = (event) => {
-    i18n.changeLanguage(event.target.value);
-  };
 
   return (
     <Box
@@ -106,16 +102,7 @@ function AppShell({ children }) {
 
         <Divider sx={{ borderColor: "divider" }} />
 
-        <Stack spacing={1}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-            {t("navbar.language")}
-          </Typography>
-          <TextField select size="small" value={i18n.language} onChange={handleLanguageChange} fullWidth>
-            <MenuItem value="en">EN</MenuItem>
-            <MenuItem value="ru">RU</MenuItem>
-            <MenuItem value="kk">KK</MenuItem>
-          </TextField>
-        </Stack>
+        <LanguageSwitcher fullWidth showLabel size="small" />
 
         <Box sx={{ mt: "auto", pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.25, lineHeight: 1.45 }}>

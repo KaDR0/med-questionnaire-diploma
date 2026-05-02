@@ -22,14 +22,11 @@
 8. Open `Pending Questionnaires` and open review page.
 9. Approve questionnaire.
 10. Login as doctor.
-11. Open `Create QR Questionnaire`.
-12. Select patient + approved questionnaire and generate QR.
-13. Open public link in incognito/mobile.
-14. Fill questionnaire and submit.
-15. Confirm success page is shown.
-16. Reopen same link and verify invalid/used flow.
-17. Return doctor panel and confirm new assessment appears.
-18. Confirm risk profile is recalculated.
-19. Verify doctor cannot open pending review actions endpoint.
-20. Verify doctor sees only own patients.
-21. Verify duplicate patient code returns clear error.
+11. Open a patient card and assign an approved questionnaire (Questionnaire assignments block).
+12. Login as the linked patient (or use patient cabinet).
+13. Open the assigned questionnaire from the patient portal and submit answers.
+14. Confirm assignment becomes completed and assessment appears for doctor and patient.
+15. Confirm risk profile is recalculated when applicable.
+16. Verify doctor cannot open pending review actions endpoint.
+17. Verify doctor sees only own patients.
+18. Verify duplicate patient code returns clear error.

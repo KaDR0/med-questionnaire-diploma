@@ -29,9 +29,9 @@ function AuditLogPage() {
       questionnaire_approved: t("dashboard.activityMap.questionnaireApproved", { id: objectId }),
       questionnaire_rejected: t("dashboard.activityMap.questionnaireRejected", { id: objectId }),
       questionnaire_changes_requested: t("dashboard.activityMap.questionnaireChangesRequested", { id: objectId }),
-      questionnaire_session_created: t("dashboard.activityMap.questionnaireSessionCreated", { patientId }),
+      questionnaire_session_created: t("dashboard.activityMap.legacyAuditEntry", { patientId }),
       assessment_submitted: t("dashboard.activityMap.assessmentSubmitted", { patientId }),
-      public_questionnaire_completed: t("dashboard.activityMap.publicQuestionnaireCompleted", { patientId }),
+      public_questionnaire_completed: t("dashboard.activityMap.legacyAuditEntry", { patientId }),
     };
     return map[action] || t("dashboard.activityMap.defaultAction");
   };

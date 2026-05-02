@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "../context/AuthContext";
 import {
   Box,
   Typography,
@@ -24,10 +25,19 @@ import {
   translateRiskLevel,
   translateRiskProblemCode,
 } from "../utils/riskFindingLabels";
+import {
+  getLocalizedAssessmentSummaryLine,
+  localizeInterpretationRecommendation,
+  localizeInterpretationTitle,
+  normalizeInterpretationKey,
+} from "../utils/assessmentInterpretation";
 
 function AssessmentResultPage() {
   const { id, assessmentId } = useParams();
+  const navigate = useNavigate();
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const isPatientViewer = user?.role === "patient";
 
   const [assessment, setAssessment] = useState(null);
   const [riskProfile, setRiskProfile] = useState(null);
@@ -65,6 +75,13 @@ function AssessmentResultPage() {
       });
   }, [assessmentId]);
 
+  useEffect(() => {
+    if (!assessment || !isPatientViewer || assessment.patient == null) return;
+    if (String(assessment.patient) !== String(id)) {
+      navigate(`/patient/assessments/${assessment.patient}/${assessmentId}`, { replace: true });
+    }
+  }, [assessment, assessmentId, id, isPatientViewer, navigate]);
+
   const formatDate = (value) => {
     if (!value) return t("common.noData");
     const date = new Date(value);
@@ -80,14 +97,11 @@ function AssessmentResultPage() {
 
   const getConclusionText = () => {
     if (!assessment) return t("common.noData");
-    if (assessment.conclusion) return assessment.conclusion;
-    if (assessment.total_score >= 3) return t("result.highRiskFallback");
-    if (assessment.total_score >= 1) return t("result.mediumRiskFallback");
-    return t("result.lowRiskFallback");
+    return getLocalizedAssessmentSummaryLine(t, assessment);
   };
 
-  const interpretationTitle = assessment?.interpretation?.title || t("common.noData");
-  const interpretationRecommendation = assessment?.interpretation?.recommendation || t("common.noData");
+  const interpretationTitle = localizeInterpretationTitle(t, assessment);
+  const interpretationRecommendation = localizeInterpretationRecommendation(t, assessment);
   const getLocalizedUrgency = (value) => {
     const normalized = String(value || "").toLowerCase();
     return t(`result.urgencyLevels.${normalized}`, { defaultValue: value || t("common.noData") });
@@ -98,6 +112,19 @@ function AssessmentResultPage() {
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_|_$/g, "")}`;
     return t(key, { defaultValue: value || t("common.noData") });
+  };
+  const getLocalizedAnswerValue = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (["yes", "true", "1"].includes(normalized)) return t("form.yes");
+    if (["no", "false", "0"].includes(normalized)) return t("form.no");
+    return value || t("common.noData");
+  };
+  const getLocalizedQualityLabel = () => {
+    const qualityKey = normalizeInterpretationKey(assessment?.quality_flag);
+    if (!qualityKey) return assessment?.quality_flag_label || t("common.noData");
+    return t(`result.qualityFlags.${qualityKey}`, {
+      defaultValue: assessment?.quality_flag_label || qualityKey,
+    });
   };
   const getLocalizedRedFlagAction = (value) => {
     const key = `result.redFlagActions.${String(value || "")
@@ -161,7 +188,7 @@ function AssessmentResultPage() {
                   <Typography>
                     <strong>{t("result.questionnaire")}:</strong>{" "}
                     {assessment.questionnaire_title ||
-                      `Questionnaire #${assessment.questionnaire}`}
+                      t("result.questionnaireFallback", { id: assessment.questionnaire })}
                   </Typography>
 
                   <Typography>
@@ -173,7 +200,7 @@ function AssessmentResultPage() {
                   </Typography>
                   <Typography>
                     <strong>{t("result.quality")}:</strong>{" "}
-                    {assessment.quality_flag_label || t("common.noData")}
+                    {getLocalizedQualityLabel()}
                     {assessment.completion_percent !== undefined
                       ? ` (${assessment.completion_percent}%)`
                       : ""}
@@ -219,23 +246,36 @@ function AssessmentResultPage() {
                   <Button variant="outlined" fullWidth onClick={handleDownloadPdf}>
                     {t("result.downloadPdf")}
                   </Button>
-                  <Button
-                    component={Link}
-                    to={`/patients/${id}`}
-                    variant="contained"
-                    fullWidth
-                  >
-                    {t("result.backToPatient")}
-                  </Button>
+                  {isPatientViewer ? (
+                    <Button
+                      component={Link}
+                      to="/patient/questionnaires"
+                      variant="contained"
+                      fullWidth
+                    >
+                      {t("result.backToMyQuestionnaires")}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        component={Link}
+                        to={`/patients/${id}`}
+                        variant="contained"
+                        fullWidth
+                      >
+                        {t("result.backToPatient")}
+                      </Button>
 
-                  <Button
-                    component={Link}
-                    to={`/patients/${id}/questionnaires`}
-                    variant="outlined"
-                    fullWidth
-                  >
-                    {t("result.openQuestionnaires")}
-                  </Button>
+                      <Button
+                        component={Link}
+                        to={`/patients/${id}/questionnaires`}
+                        variant="outlined"
+                        fullWidth
+                      >
+                        {t("result.openQuestionnaires")}
+                      </Button>
+                    </>
+                  )}
                 </Stack>
               </CardContent>
             </Card>
@@ -268,11 +308,13 @@ function AssessmentResultPage() {
                         >
                           <CardContent>
                             <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-                              {index + 1}. {answer.question_text || `Question #${answer.question}`}
+                              {index + 1}.{" "}
+                              {answer.question_text ||
+                                t("result.questionFallback", { id: answer.question })}
                             </Typography>
 
                             <Typography sx={{ mb: 1 }}>
-                              <strong>{t("result.answer")}:</strong> {answer.value || t("common.noData")}
+                              <strong>{t("result.answer")}:</strong> {getLocalizedAnswerValue(answer.value)}
                             </Typography>
 
                             <Typography color="text.secondary">

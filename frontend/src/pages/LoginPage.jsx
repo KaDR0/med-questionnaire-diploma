@@ -5,18 +5,47 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Container,
   TextField,
   Typography,
   Alert,
+  Stack,
 } from "@mui/material";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "react-i18next";
 import LogoLockup from "../components/brand/LogoLockup";
+import AuthScaffold from "../components/AuthScaffold";
+
+/** Maps backend `error_code` to i18n keys; falls back to API `error` string. */
+function login2faErrorMessage(err, t) {
+  const code = err?.response?.data?.error_code;
+  const keyByCode = {
+    cooldown: "login.otpCooldown",
+    rate_limit: "login.otpRateLimitHour",
+    smtp_config_error: "login.otpSendFailed",
+    smtp_send_failed: "login.otpSendFailed",
+    challenge_expired: "login.otpChallengeExpired",
+    challenge_invalid: "login.otpChallengeInvalid",
+    invalid_code: "login.otpInvalid",
+    max_attempts_exceeded: "login.otpAttemptsExceeded",
+    code_expired: "login.otpExpired",
+    code_not_requested: "login.otpNotRequested",
+  };
+  if (code && keyByCode[code]) {
+    return t(keyByCode[code]);
+  }
+  return (
+    err?.response?.data?.error ||
+    err?.response?.data?.message ||
+    err?.message ||
+    t("login.error")
+  );
+}
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { login, verifyPatientLoginCode } = useAuth();
+  const { login, verifyLoginCode } = useAuth();
   const { t } = useTranslation();
 
   const [form, setForm] = useState({
@@ -29,6 +58,7 @@ function LoginPage() {
   const [verificationCode, setVerificationCode] = useState("");
   const [challengeToken, setChallengeToken] = useState("");
   const [verificationEmail, setVerificationEmail] = useState("");
+  const [rememberDevice, setRememberDevice] = useState(false);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({
@@ -53,12 +83,7 @@ function LoginPage() {
     } catch (err) {
       console.error("Login error:", err);
 
-      const message =
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        err?.code ||
-        t("login.error");
+      const message = login2faErrorMessage(err, t);
 
       setError(message);
     } finally {
@@ -70,16 +95,15 @@ function LoginPage() {
     try {
       setError("");
       setSubmitting(true);
-      await verifyPatientLoginCode(challengeToken, String(verificationCode || "").trim());
+      await verifyLoginCode(
+        challengeToken,
+        String(verificationCode || "").trim(),
+        rememberDevice,
+      );
       navigate("/");
     } catch (err) {
-      console.error("Patient login verify error:", err);
-      const message =
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        t("login.error");
-      setError(message);
+      console.error("Login verify error:", err);
+      setError(login2faErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
@@ -95,12 +119,7 @@ function LoginPage() {
         setVerificationEmail(result.email || form.email);
       }
     } catch (err) {
-      const message =
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        t("login.error");
-      setError(message);
+      setError(login2faErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }
@@ -111,14 +130,13 @@ function LoginPage() {
     setVerificationCode("");
     setChallengeToken("");
     setVerificationEmail("");
+    setRememberDevice(false);
     setError("");
   };
 
   return (
-    <Box
-      className="mq-workspace-bg"
+    <AuthScaffold
       sx={{
-        minHeight: "100vh",
         display: "flex",
         alignItems: "center",
         py: 4,
@@ -174,44 +192,73 @@ function LoginPage() {
                 </Button>
               </>
             ) : (
-              <>
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  {t("login.patientVerificationRequired", { email: verificationEmail || form.email })}
+              <Stack spacing={2}>
+                <Alert severity="info">
+                  {t("login.verificationRequired", { email: verificationEmail || form.email })}
                 </Alert>
                 <TextField
                   fullWidth
                   label={t("login.verificationCode")}
-                  sx={{ mb: 3 }}
                   value={verificationCode}
                   onChange={(e) => setVerificationCode(e.target.value)}
+                  inputProps={{ autoComplete: "one-time-code" }}
                 />
+                <Box
+                  data-testid="login-remember-device"
+                  sx={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 1.5,
+                    p: 2,
+                    borderRadius: 1,
+                    border: 1,
+                    borderColor: "divider",
+                    bgcolor: (theme) =>
+                      theme.palette.mode === "dark" ? "rgba(255,255,255,0.06)" : "action.hover",
+                  }}
+                >
+                  <Checkbox
+                    id="login-remember-device-checkbox"
+                    checked={rememberDevice}
+                    onChange={(e) => setRememberDevice(e.target.checked)}
+                    color="primary"
+                    sx={{ p: 0, mt: 0.25 }}
+                    inputProps={{ "aria-describedby": "login-remember-device-hint" }}
+                  />
+                  <Box
+                    component="label"
+                    htmlFor="login-remember-device-checkbox"
+                    sx={{ cursor: "pointer", userSelect: "none", flex: 1, minWidth: 0 }}
+                  >
+                    <Typography variant="subtitle1" component="span" fontWeight={600} display="block">
+                      {t("login.rememberDevice")}
+                    </Typography>
+                    <Typography
+                      id="login-remember-device-hint"
+                      variant="body2"
+                      color="text.secondary"
+                      display="block"
+                      sx={{ mt: 0.75 }}
+                    >
+                      {t("login.rememberDeviceHint")}
+                    </Typography>
+                  </Box>
+                </Box>
                 <Button
                   variant="contained"
                   fullWidth
                   onClick={handleVerifyCode}
                   disabled={submitting || !String(verificationCode || "").trim()}
-                  sx={{ mb: 2 }}
                 >
                   {submitting ? t("login.loading") : t("login.verifyButton")}
                 </Button>
-                <Button
-                  variant="text"
-                  fullWidth
-                  onClick={handleResendCode}
-                  disabled={submitting}
-                  sx={{ mb: 1 }}
-                >
+                <Button variant="text" fullWidth onClick={handleResendCode} disabled={submitting}>
                   {t("login.resendCode")}
                 </Button>
-                <Button
-                  variant="text"
-                  fullWidth
-                  onClick={handleBackToLogin}
-                  disabled={submitting}
-                >
+                <Button variant="text" fullWidth onClick={handleBackToLogin} disabled={submitting}>
                   {t("login.backToLogin")}
                 </Button>
-              </>
+              </Stack>
             )}
 
             <Typography variant="body2" color="text.secondary">
@@ -228,7 +275,7 @@ function LoginPage() {
           </CardContent>
         </Card>
       </Container>
-    </Box>
+    </AuthScaffold>
   );
 }
 

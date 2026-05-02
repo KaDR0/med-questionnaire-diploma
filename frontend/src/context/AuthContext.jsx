@@ -56,10 +56,11 @@ export function AuthProvider({ children }) {
     return response.data;
   };
 
-  const verifyPatientLoginCode = async (challengeToken, code) => {
-    const response = await api.post("auth/patient-login/verify-code/", {
+  const verifyLoginCode = async (challengeToken, code, rememberDevice = false) => {
+    const response = await api.post("auth/login/verify-code/", {
       challenge_token: challengeToken,
       code,
+      remember_device: Boolean(rememberDevice),
     });
     storeTokens({ access: response.data.access, refresh: response.data.refresh });
     setUser(response.data.user);
@@ -90,7 +91,8 @@ export function AuthProvider({ children }) {
         user,
         loading,
         login,
-        verifyPatientLoginCode,
+        verifyLoginCode,
+        verifyPatientLoginCode: verifyLoginCode,
         signup,
         logout,
         isAuthenticated: !!user,

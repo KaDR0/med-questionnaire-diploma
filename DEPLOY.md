@@ -36,43 +36,25 @@ For local development use values from `med-questionnaire/.env.example`.
 - Output directory: `dist`
 - Set frontend env variables in Vercel project settings.
 
-## QR link behavior
+## Patient questionnaire flow (assignment)
 
-QR links now use:
+Questionnaires are assigned to patients from the **patient card** in the doctor workspace; patients complete them in the **patient portal**. No separate public token URL is used.
 
-- `VITE_PUBLIC_SITE_URL` when it is configured
-- fallback: `window.location.origin` when env is missing
-
-Result format:
-
-- `${VITE_PUBLIC_SITE_URL}/public/questionnaire/${token}`
+`VITE_PUBLIC_SITE_URL` is optional for absolute links in emails (assignment notifications) if you configure it.
 
 ## Validation checklist
 
-1. Open doctor page to create QR.
-2. Generate QR and confirm it contains your real frontend domain (not localhost).
-3. Scan QR from phone on mobile network.
-4. Complete questionnaire and confirm success page opens.
+1. Assign a questionnaire from a patient card and confirm the patient sees it in the portal.
+2. Complete the questionnaire as the patient and confirm results for doctor and patient.
+3. On mobile, open the same frontend URL (see local LAN testing below) and repeat the login + portal flow.
 
-## Local network testing (QR from phone without deploy)
+## Local network testing (phone on same Wi‑Fi)
 
-Use this mode when frontend/backend run on your MacBook and phone is on the same Wi-Fi.
+Use this when frontend/backend run on your machine and the phone is on the same network.
 
-1. Find your MacBook LAN IP (example: `192.168.1.42`):
-   - `ipconfig getifaddr en0`
-   - if empty, try: `ipconfig getifaddr en1`
-2. Set frontend env (`frontend/.env`):
-   - `VITE_API_BASE_URL=http://192.168.x.x:8000/api`
-   - `VITE_PUBLIC_SITE_URL=http://192.168.x.x:5175`
-3. Set backend env (`med-questionnaire/.env`):
-   - `ALLOWED_HOSTS=localhost,127.0.0.1,192.168.x.x`
-   - `CORS_ALLOWED_ORIGINS=http://localhost:5175,http://127.0.0.1:5175,http://192.168.x.x:5175`
-   - `CSRF_TRUSTED_ORIGINS=http://localhost:5175,http://127.0.0.1:5175,http://192.168.x.x:5175`
-4. Start backend:
-   - `python3 manage.py runserver 0.0.0.0:8000`
-5. Start frontend:
-   - `npm run dev -- --host 0.0.0.0 --port 5175`
-6. Open on phone:
-   - `http://192.168.x.x:5175`
-7. Generate QR and verify visible link near QR starts with:
-   - `http://192.168.x.x:5175/public/questionnaire/...`
+1. Find your LAN IP (example: `192.168.1.42`): `ipconfig getifaddr en0` (or `en1`).
+2. Frontend (`frontend/.env`): `VITE_API_BASE_URL=http://192.168.x.x:8000/api`, optionally `VITE_PUBLIC_SITE_URL=http://192.168.x.x:5175`.
+3. Backend (`med-questionnaire/.env`): add the LAN IP to `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `CSRF_TRUSTED_ORIGINS`.
+4. Start backend: `python3 manage.py runserver 0.0.0.0:8000`
+5. Start frontend: `npm run dev -- --host 0.0.0.0 --port 5175`
+6. On the phone, open `http://192.168.x.x:5175` and test login + patient portal.

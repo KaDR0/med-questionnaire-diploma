@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
@@ -405,28 +406,79 @@ class RiskRedFlag(models.Model):
         return f"{self.urgency_level} red flag"
 
 
-class QuestionnaireSession(models.Model):
-    STATUS_ACTIVE = "active"
+class QuestionnaireAssignment(models.Model):
+    """
+    Doctor-assigned questionnaire for a patient.
+    When the patient completes the flow via the cabinet, `result_assessment` and `completed_at` are set.
+    """
+
+    STATUS_ASSIGNED = "assigned"
+    STATUS_IN_PROGRESS = "in_progress"
     STATUS_COMPLETED = "completed"
     STATUS_EXPIRED = "expired"
+    STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
-        (STATUS_ACTIVE, "Active"),
+        (STATUS_ASSIGNED, "Assigned"),
+        (STATUS_IN_PROGRESS, "In progress"),
         (STATUS_COMPLETED, "Completed"),
         (STATUS_EXPIRED, "Expired"),
+        (STATUS_CANCELLED, "Cancelled"),
     ]
+    # Statuses that count as one concurrent "open" assignment per (patient, questionnaire).
+    ACTIVE_STATUSES = (STATUS_ASSIGNED, STATUS_IN_PROGRESS)
+    # API cancel only allows these (completed / expired / cancelled are terminal for cancel).
+    CANCELLABLE_STATUSES = (STATUS_ASSIGNED, STATUS_IN_PROGRESS)
 
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="questionnaire_sessions")
-    questionnaire = models.ForeignKey(Questionnaire, on_delete=models.CASCADE, related_name="questionnaire_sessions")
-    doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="questionnaire_sessions")
-    token = models.CharField(max_length=128, unique=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
-    expires_at = models.DateTimeField()
-    created_at = models.DateTimeField(auto_now_add=True)
+    patient = models.ForeignKey(
+        Patient, on_delete=models.CASCADE, related_name="questionnaire_assignments"
+    )
+    questionnaire = models.ForeignKey(
+        Questionnaire, on_delete=models.PROTECT, related_name="assignments"
+    )
+    assigned_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="questionnaire_assignments_created",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ASSIGNED)
+    due_date = models.DateField(null=True, blank=True)
+    note = models.TextField(blank=True, default="")
     completed_at = models.DateTimeField(null=True, blank=True)
-    used_at = models.DateTimeField(null=True, blank=True)
+    result_assessment = models.ForeignKey(
+        "Assessment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="questionnaire_assignments",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-assigned_at"]
+        indexes = [
+            models.Index(fields=["patient", "-assigned_at"]),
+            models.Index(fields=["questionnaire", "status"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["patient", "questionnaire"],
+                condition=Q(status__in=["assigned", "in_progress"]),
+                name="core_qassign_uniq_active_patient_questionnaire",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.result_assessment_id:
+            ra = self.result_assessment
+            if ra.patient_id != self.patient_id or ra.questionnaire_id != self.questionnaire_id:
+                raise ValidationError(
+                    "result_assessment must belong to the same patient and questionnaire as this assignment."
+                )
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Session {self.id} for patient {self.patient_id}"
+        return f"Assignment {self.id}: patient={self.patient_id} questionnaire={self.questionnaire_id} ({self.status})"
 
 
 class AuditLog(models.Model):
@@ -440,6 +492,28 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.object_type}:{self.object_id}"
+
+
+class PatientTrustedDevice(models.Model):
+    """
+    Server-side record for 'remember this device' during patient 2FA login.
+    Raw token is stored only in an httpOnly cookie; DB keeps SHA-256 hash.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="patient_trusted_devices")
+    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(auto_now=True)
+    user_agent = models.CharField(max_length=512, blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"trusted_device user={self.user_id} expires={self.expires_at}"
 
 
 class EmailVerificationCode(models.Model):

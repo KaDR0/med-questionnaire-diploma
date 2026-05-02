@@ -5,6 +5,7 @@ from django.core.cache import cache
 from django.db import transaction
 import logging
 import hashlib
+import secrets
 from django.core import signing
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -14,13 +15,20 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.db.utils import OperationalError, ProgrammingError
 
-from .models import DoctorProfile, AuditLog
+from .models import DoctorProfile, AuditLog, EmailVerificationCode
 from .permissions import get_user_role
 from .verification import VerificationError, create_and_send_verification_code, verify_code
 from .models import Patient
+from .trusted_device import attach_trusted_device_cookie, issue_trusted_device, validate_trusted_device
 
 logger = logging.getLogger(__name__)
-PATIENT_LOGIN_CHALLENGE_SALT = "patient-login-verification"
+LOGIN_2FA_CHALLENGE_SALT = "login-2fa-verification"
+MEDICAL_LOGIN_2FA_ROLES = {
+    DoctorProfile.ROLE_PATIENT,
+    DoctorProfile.ROLE_DOCTOR,
+    DoctorProfile.ROLE_CHIEF_DOCTOR,
+}
+LOGIN_2FA_PURPOSE = EmailVerificationCode.PURPOSE_PATIENT_LOGIN
 
 
 def _serialize_auth_payload(user):
@@ -42,9 +50,9 @@ def _serialize_auth_payload(user):
     }
 
 
-def _patient_login_challenge_cache_key(challenge_token):
+def _login_2fa_challenge_cache_key(challenge_token):
     digest = hashlib.sha256(str(challenge_token or "").encode("utf-8")).hexdigest()
-    return f"patient_login_challenge_used:{digest}"
+    return f"login_2fa_challenge_used:{digest}"
 
 
 def _get_photo_data_url(user):
@@ -153,6 +161,8 @@ class LoginAPIView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        # Trusted device is evaluated only after successful password authentication.
+        # Cookie alone cannot authenticate; validate_trusted_device() always pairs cookie hash with this user.
         login_value = request.data.get("email", "").strip() or request.data.get("username", "").strip()
         password = request.data.get("password", "")
 
@@ -163,13 +173,27 @@ class LoginAPIView(APIView):
             )
 
         user = None
+        normalized_login = str(login_value).strip().lower()
 
         if "@" in login_value:
-            try:
-                found_user = User.objects.get(email=login_value)
+            found_user = User.objects.filter(email__iexact=normalized_login).first()
+            if found_user:
                 user = authenticate(username=found_user.username, password=password)
-            except User.DoesNotExist:
-                user = None
+            else:
+                # Patient card email may differ from auth.User.email if updates were not synced.
+                patient_row = (
+                    Patient.objects.filter(email__iexact=normalized_login)
+                    .exclude(user=None)
+                    .select_related("user")
+                    .first()
+                )
+                if patient_row and patient_row.user_id:
+                    candidate = patient_row.user
+                    user = authenticate(username=candidate.username, password=password)
+                    if user is not None and user.id == candidate.id:
+                        if (user.email or "").strip().lower() != normalized_login:
+                            user.email = normalized_login
+                            user.save(update_fields=["email"])
         else:
             user = authenticate(username=login_value, password=password)
 
@@ -180,24 +204,70 @@ class LoginAPIView(APIView):
             )
 
         role = get_user_role(user)
-        if role == DoctorProfile.ROLE_PATIENT:
+        if role in MEDICAL_LOGIN_2FA_ROLES:
+            if validate_trusted_device(request, user):
+                return Response(_serialize_auth_payload(user), status=status.HTTP_200_OK)
+            logger.info("login_2fa: will_send_otp user_id=%s role=%s", user.id, role)
+            if not (user.email or "").strip():
+                logger.warning("login_2fa blocked: missing_email user_id=%s role=%s", user.id, role)
+                return Response(
+                    {
+                        "error": "Account email is required for verification. Please contact an administrator.",
+                        "error_code": "email_missing",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             try:
                 create_and_send_verification_code(
                     email=user.email,
-                    purpose="patient_login",
+                    purpose=LOGIN_2FA_PURPOSE,
                 )
             except VerificationError as exc:
-                return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+                error_code = getattr(exc, "code", "")
+                logger.warning(
+                    "Login OTP request failed: user_id=%s role=%s email=%s code=%s detail=%s",
+                    user.id,
+                    role,
+                    user.email,
+                    error_code,
+                    str(exc),
+                )
+                if error_code in {"cooldown", "rate_limit"}:
+                    return Response(
+                        {
+                            "error": exc.public_message,
+                            "error_code": error_code,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if error_code in {"smtp_config_error", "smtp_send_failed"}:
+                    return Response(
+                        {
+                            "error": "Failed to send verification code. Please try again later.",
+                            "error_code": error_code,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                return Response(
+                    {"error": "Unable to start verification.", "error_code": error_code or "verification_error"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             challenge_token = signing.dumps(
-                {"user_id": user.id, "email": user.email},
-                salt=PATIENT_LOGIN_CHALLENGE_SALT,
+                {
+                    "user_id": user.id,
+                    "email": user.email,
+                    "role": role,
+                    "nonce": secrets.token_urlsafe(8),
+                },
+                salt=LOGIN_2FA_CHALLENGE_SALT,
             )
             return Response(
                 {
                     "verification_required": True,
                     "challenge_token": challenge_token,
                     "email": user.email,
+                    "verification_role": role,
                     "message": "Verification code sent.",
                 },
                 status=status.HTTP_200_OK,
@@ -206,7 +276,7 @@ class LoginAPIView(APIView):
         return Response(_serialize_auth_payload(user), status=status.HTTP_200_OK)
 
 
-class PatientLoginVerifyCodeAPIView(APIView):
+class LoginVerifyCodeAPIView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -217,12 +287,12 @@ class PatientLoginVerifyCodeAPIView(APIView):
 
         try:
             max_age = int(getattr(settings, "VERIFICATION_CODE_TTL_SECONDS", 600))
-            challenge_cache_key = _patient_login_challenge_cache_key(challenge_token)
+            challenge_cache_key = _login_2fa_challenge_cache_key(challenge_token)
             if cache.get(challenge_cache_key):
                 raise VerificationError("Login verification has already been completed.")
             payload = signing.loads(
                 challenge_token,
-                salt=PATIENT_LOGIN_CHALLENGE_SALT,
+                salt=LOGIN_2FA_CHALLENGE_SALT,
                 max_age=max_age,
             )
             user_id = payload.get("user_id")
@@ -231,18 +301,63 @@ class PatientLoginVerifyCodeAPIView(APIView):
                 raise VerificationError("Invalid login verification session.")
 
             user = User.objects.filter(id=user_id, email__iexact=email).first()
-            if not user or get_user_role(user) != DoctorProfile.ROLE_PATIENT:
+            role = get_user_role(user) if user else None
+            if not user or role not in MEDICAL_LOGIN_2FA_ROLES:
                 raise VerificationError("Invalid login verification session.")
 
-            verify_code(email=email, purpose="patient_login", code=code)
+            verify_code(email=email, purpose=LOGIN_2FA_PURPOSE, code=code)
             cache.set(challenge_cache_key, True, timeout=max_age)
-            return Response(_serialize_auth_payload(user), status=status.HTTP_200_OK)
+            remember_raw = request.data.get("remember_device")
+            remember_device = remember_raw in (True, "true", "1", 1, "yes", "on")
+            logger.info(
+                "login_2fa_verify: user_id=%s role=%s remember_device=%s raw=%r",
+                user.id,
+                role,
+                remember_device,
+                remember_raw,
+            )
+            response = Response(_serialize_auth_payload(user), status=status.HTTP_200_OK)
+            if remember_device:
+                raw_token, td = issue_trusted_device(request, user)
+                attach_trusted_device_cookie(response, raw_token, request)
+                logger.info(
+                    "Trusted device registered user_id=%s role=%s device_id=%s ttl_seconds=%s",
+                    user.id,
+                    role,
+                    td.id,
+                    getattr(settings, "PATIENT_TRUSTED_DEVICE_MAX_AGE_SECONDS", 0),
+                )
+            return response
         except signing.SignatureExpired:
-            return Response({"error": "Login verification has expired. Please sign in again."}, status=status.HTTP_400_BAD_REQUEST)
+            logger.warning("Login OTP verify failed: reason=challenge_expired")
+            return Response(
+                {
+                    "error": "Login verification has expired. Please sign in again.",
+                    "error_code": "challenge_expired",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except signing.BadSignature:
-            return Response({"error": "Invalid login verification session."}, status=status.HTTP_400_BAD_REQUEST)
+            logger.warning("Login OTP verify failed: reason=challenge_bad_signature")
+            return Response(
+                {"error": "Invalid login verification session.", "error_code": "challenge_invalid"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except VerificationError as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            error_code = getattr(exc, "code", "")
+            logger.warning(
+                "Login OTP verify failed: code=%s detail=%s",
+                error_code,
+                str(exc),
+            )
+            return Response(
+                {"error": exc.public_message, "error_code": error_code or "verification_error"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+# Backward-compatible alias for existing imports/urls.
+PatientLoginVerifyCodeAPIView = LoginVerifyCodeAPIView
 
 
 class LogoutAPIView(APIView):
@@ -250,18 +365,19 @@ class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        detail = {"detail": "Logged out"}
+        status_code = status.HTTP_200_OK
         try:
             refresh_token = request.data.get("refresh")
             if refresh_token:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
         except Exception:
-            return Response(
-                {"detail": "Logout completed locally. Token blacklist is not enabled."},
-                status=status.HTTP_200_OK,
-            )
+            detail = {"detail": "Logout completed locally. Token blacklist is not enabled."}
 
-        return Response({"detail": "Logged out"}, status=status.HTTP_200_OK)
+        # JWT/session ends here; patient trusted-device cookie is intentionally kept until TTL expiry
+        # so "remember this device" still skips OTP on the next password login (guarantee #4).
+        return Response(detail, status=status_code)
 
 
 class MeAPIView(APIView):
@@ -302,14 +418,20 @@ class DoctorProfileUpdateAPIView(APIView):
             if last_name is not None:
                 user.last_name = str(last_name or "").strip()
             if email is not None:
-                normalized_email = str(email or "").strip()
+                normalized_email = str(email or "").strip().lower()
                 if not normalized_email:
                     return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
-                if User.objects.filter(email=normalized_email).exclude(id=user.id).exists():
+                if User.objects.filter(email__iexact=normalized_email).exclude(id=user.id).exists():
                     return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
                 user.email = normalized_email
             if first_name is not None or last_name is not None or email is not None:
                 user.save(update_fields=["first_name", "last_name", "email"])
+            # Patient portal profile email must stay aligned with linked Patient.email for cards / signup parity.
+            if email is not None and get_user_role(user) == DoctorProfile.ROLE_PATIENT:
+                linked_patient = Patient.objects.filter(user=user).first()
+                if linked_patient:
+                    linked_patient.email = user.email
+                    linked_patient.save(update_fields=["email", "updated_at"])
 
             allowed_fields = {
                 "specialty",
