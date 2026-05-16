@@ -1,36 +1,47 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import api from "../api/axios";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-
 import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Button,
-  CircularProgress,
-  Grid,
-  Chip,
-  TextField,
-  InputAdornment,
-  Stack,
   Alert,
-  Snackbar,
+  Avatar,
+  Box,
+  Button,
+  Chip,
   Dialog,
-  DialogTitle,
-  DialogContent,
   DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  InputAdornment,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
-  Divider,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
+
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import ClearRoundedIcon from "@mui/icons-material/ClearRounded";
+import FileUploadRoundedIcon from "@mui/icons-material/FileUploadRounded";
+import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
+import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
+
+import api from "../api/axios";
+import useToast from "../utils/useToast";
 import PageHeader from "../components/ui/PageHeader";
-import DashboardStatCard from "../components/ui/DashboardStatCard";
-import SectionCard from "../components/ui/SectionCard";
-import SearchFilterBar from "../components/ui/SearchFilterBar";
+import KpiCard from "../components/ui/KpiCard";
+import DataTable from "../components/ui/DataTable";
 import StatusChip from "../components/ui/StatusChip";
-import EmptyWorkspaceIllustration from "../components/ui/EmptyWorkspaceIllustration";
+import EmptyState from "../components/ui/EmptyState";
 
 function initialsFromFullName(name) {
   const s = String(name || "").trim();
@@ -43,6 +54,8 @@ function initialsFromFullName(name) {
 function PatientsPage() {
   const { t } = useTranslation();
   const theme = useTheme();
+  const navigate = useNavigate();
+  const toast = useToast();
 
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,11 +64,13 @@ function PatientsPage() {
   const [importingLabs, setImportingLabs] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [labImportResult, setLabImportResult] = useState(null);
-  const [feedback, setFeedback] = useState({
-    open: false,
-    severity: "success",
-    message: "",
-  });
+
+  const [importAnchor, setImportAnchor] = useState(null);
+  const importMenuOpen = Boolean(importAnchor);
+
+  const patientsFileRef = useRef(null);
+  const labsFileRef = useRef(null);
+
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [creatingPatient, setCreatingPatient] = useState(false);
   const [patientFieldErrors, setPatientFieldErrors] = useState({});
@@ -87,15 +102,20 @@ function PatientsPage() {
 
   const filteredPatients = useMemo(() => {
     const value = search.trim().toLowerCase();
-
     if (!value) return patients;
-
     return patients.filter((patient) => {
       const name = patient.full_name?.toLowerCase() || "";
       const code = patient.patient_code?.toLowerCase() || "";
-      return name.includes(value) || code.includes(value);
+      const email = patient.email?.toLowerCase() || "";
+      return name.includes(value) || code.includes(value) || email.includes(value);
     });
   }, [patients, search]);
+
+  const highRiskCount = useMemo(
+    () =>
+      patients.filter((p) => p.status === "attention" || p.status === "critical").length,
+    [patients]
+  );
 
   const getSexLabel = (sex) => {
     if (sex === 1) return t("patients.male");
@@ -103,36 +123,36 @@ function PatientsPage() {
     return t("common.noData");
   };
 
-  const showFeedback = (message, severity = "success") => {
-    setFeedback({ open: true, severity, message });
+  const handleImportPatientsClick = () => {
+    setImportAnchor(null);
+    patientsFileRef.current?.click();
+  };
+
+  const handleImportLabsClick = () => {
+    setImportAnchor(null);
+    labsFileRef.current?.click();
   };
 
   const handleImportFileChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-
     try {
       setImporting(true);
       setImportResult(null);
-
       const formData = new FormData();
       formData.append("file", file);
-
       const response = await api.post("patients/import/", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+        headers: { "Content-Type": "multipart/form-data" },
       });
-
       setImportResult(response.data);
       await loadPatients();
-      showFeedback(t("patients.importSuccess"));
+      toast.success(t("patients.importSuccess"));
     } catch (error) {
       console.error("Import patients error:", error);
       const message =
         error?.response?.data?.error || error?.message || t("patients.importError");
-      showFeedback(message, "error");
+      toast.error(message);
     } finally {
       setImporting(false);
     }
@@ -142,82 +162,71 @@ function PatientsPage() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-
     try {
       setImportingLabs(true);
       setLabImportResult(null);
-
       const formData = new FormData();
       formData.append("file", file);
-
       const response = await api.post("labs/import/", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+        headers: { "Content-Type": "multipart/form-data" },
       });
-
       setLabImportResult(response.data);
       await loadPatients();
-      showFeedback(t("patients.labImportSuccess"));
+      toast.success(t("patients.labImportSuccess"));
     } catch (error) {
       console.error("Import labs error:", error);
       const message =
         error?.response?.data?.error || error?.message || t("patients.labImportError");
-      showFeedback(message, "error");
+      toast.error(message);
     } finally {
       setImportingLabs(false);
     }
   };
 
+  const downloadBlob = (data, filename) => {
+    const url = window.URL.createObjectURL(new Blob([data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   const handleDownloadLabTemplate = async () => {
+    setImportAnchor(null);
     try {
-      const response = await api.get("labs/template/", {
-        responseType: "blob",
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", "lab_import_template.xlsx");
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const response = await api.get("labs/template/", { responseType: "blob" });
+      downloadBlob(response.data, "lab_import_template.xlsx");
     } catch (error) {
       console.error("Download template error:", error);
-      showFeedback(t("patients.labTemplateError"), "error");
+      toast.error(t("patients.labTemplateError"));
     }
   };
 
   const handleDownloadPatientTemplate = async () => {
+    setImportAnchor(null);
     try {
-      const response = await api.get("patients/template/", {
-        responseType: "blob",
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", "patient_import_template.xlsx");
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const response = await api.get("patients/template/", { responseType: "blob" });
+      downloadBlob(response.data, "patient_import_template.xlsx");
     } catch (error) {
       console.error("Download patient template error:", error);
-      showFeedback(t("patients.patientTemplateError"), "error");
+      toast.error(t("patients.patientTemplateError"));
     }
   };
 
-  const handleDeletePatient = async (patientId) => {
+  const handleDeletePatient = async (patientId, event) => {
+    event?.stopPropagation?.();
     const confirmed = window.confirm(t("detail.deletePatientConfirm"));
     if (!confirmed) return;
-
     try {
       await api.delete(`patients/${patientId}/delete/`);
       await loadPatients();
-      showFeedback(t("detail.patientDeleted"));
+      toast.success(t("detail.patientDeleted"));
     } catch (error) {
       console.error("Delete patient error:", error);
-      showFeedback(t("detail.patientDeleteError"), "error");
+      toast.error(t("detail.patientDeleteError"));
     }
   };
 
@@ -248,7 +257,7 @@ function PatientsPage() {
 
   const handleCreatePatient = async () => {
     if (!newPatient.full_name.trim()) {
-      showFeedback(t("patients.createValidationError"), "error");
+      toast.error(t("patients.createValidationError"));
       return;
     }
     try {
@@ -267,7 +276,7 @@ function PatientsPage() {
       };
       await api.post("patients/", payload);
       await loadPatients();
-      showFeedback(t("patients.createSuccess"));
+      toast.success(t("patients.createSuccess"));
       setAddDialogOpen(false);
       resetNewPatientForm();
     } catch (error) {
@@ -279,11 +288,129 @@ function PatientsPage() {
         error?.response?.data?.full_name?.[0] ||
         error?.response?.data?.detail ||
         t("patients.createError");
-      showFeedback(message, "error");
+      toast.error(message);
     } finally {
       setCreatingPatient(false);
     }
   };
+
+  const columns = useMemo(
+    () => [
+      {
+        id: "patient",
+        label: t("patients.fullName"),
+        accessor: (row) => row.full_name || "",
+        render: (row) => (
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+            <Avatar
+              sx={{
+                width: 36,
+                height: 36,
+                fontWeight: 700,
+                fontSize: "0.8125rem",
+                bgcolor: alpha(theme.palette.primary.main, 0.14),
+                color: "primary.dark",
+              }}
+            >
+              {initialsFromFullName(row.full_name)}
+            </Avatar>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, lineHeight: 1.2 }} noWrap>
+                {row.full_name || t("patients.noId")}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {row.patient_code ? `#${row.patient_code}` : t("patients.noId")}
+                {row.email ? ` · ${row.email}` : ""}
+              </Typography>
+            </Box>
+          </Stack>
+        ),
+        wrap: true,
+      },
+      {
+        id: "age",
+        label: t("patients.age"),
+        accessor: (row) => (row.age == null ? null : Number(row.age)),
+        render: (row) => row.age ?? t("common.noData"),
+        width: 90,
+      },
+      {
+        id: "sex",
+        label: t("patients.sex"),
+        accessor: (row) => row.sex,
+        render: (row) => getSexLabel(row.sex),
+        width: 110,
+      },
+      {
+        id: "status",
+        label: t("patients.statusLabel"),
+        accessor: (row) => row.status || "",
+        render: (row) =>
+          row.status ? (
+            <StatusChip
+              label={row.status_label || t(`detail.statusOptions.${row.status}`)}
+              status={row.status}
+            />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {t("common.noData")}
+            </Typography>
+          ),
+        width: 160,
+      },
+      {
+        id: "next",
+        label: t("patients.nextVisitCard"),
+        accessor: (row) => row.next_visit_date || "",
+        render: (row) =>
+          row.next_visit_date ? (
+            <Typography variant="body2">{row.next_visit_date}</Typography>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {t("patients.nextVisitNone")}
+            </Typography>
+          ),
+        width: 150,
+      },
+      {
+        id: "actions",
+        label: t("patients.actions"),
+        sortable: false,
+        align: "right",
+        render: (row) => (
+          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+            <Tooltip title={t("patients.openProfile")}>
+              <IconButton
+                size="small"
+                component={Link}
+                to={`/patients/${row.id}`}
+                onClick={(e) => e.stopPropagation()}
+                aria-label={t("patients.openProfile")}
+              >
+                <OpenInNewRoundedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title={t("detail.deletePatient")}>
+              <IconButton
+                size="small"
+                color="error"
+                onClick={(e) => handleDeletePatient(row.id, e)}
+                aria-label={t("detail.deletePatient")}
+              >
+                <DeleteOutlineRoundedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        ),
+        width: 140,
+      },
+    ],
+    // getSexLabel and handleDeletePatient close over `t`/component state but are
+    // referentially unstable on every render; including them would needlessly
+    // rebuild the column descriptors on every keystroke in the search box.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, theme]
+  );
 
   return (
     <Box>
@@ -291,388 +418,275 @@ function PatientsPage() {
         title={t("patients.dashboard")}
         subtitle={t("patients.dashboardText")}
         actions={
-          <Stack spacing={1.5} sx={{ width: "100%" }}>
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1}
-              useFlexGap
-              sx={{ flexWrap: "wrap", justifyContent: { sm: "flex-end" } }}
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            useFlexGap
+            sx={{ flexWrap: "wrap", justifyContent: { sm: "flex-end" } }}
+          >
+            <Button
+              variant="contained"
+              startIcon={<AddRoundedIcon />}
+              onClick={handleOpenAddDialog}
             >
-              <Button variant="contained" onClick={handleOpenAddDialog}>
-                {t("patients.addPatient")}
-              </Button>
-              <Button variant="outlined" component="label" disabled={importing}>
-                {importing ? t("patients.importing") : t("patients.importPatients")}
-                <input type="file" hidden accept=".xlsx,.xlsm,.xltx,.xltm" onChange={handleImportFileChange} />
-              </Button>
-              <Button variant="outlined" component="label" disabled={importingLabs}>
-                {importingLabs ? t("patients.labImporting") : t("patients.importLabs")}
-                <input type="file" hidden accept=".xlsx,.xlsm,.xltx,.xltm" onChange={handleLabImportFileChange} />
-              </Button>
-            </Stack>
-            <Divider sx={{ borderColor: "divider" }} />
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1}
-              useFlexGap
-              sx={{ flexWrap: "wrap", justifyContent: { sm: "flex-end" } }}
+              {t("patients.addPatient")}
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<CloudUploadRoundedIcon />}
+              endIcon={
+                <Box
+                  component="span"
+                  sx={{ display: "inline-flex", "& svg": { fontSize: 18 } }}
+                  aria-hidden
+                >
+                  <DownloadRoundedIcon fontSize="inherit" />
+                </Box>
+              }
+              onClick={(e) => setImportAnchor(e.currentTarget)}
+              aria-controls={importMenuOpen ? "import-menu" : undefined}
+              aria-haspopup="true"
+              aria-expanded={importMenuOpen ? "true" : undefined}
+              disabled={importing || importingLabs}
             >
-              <Button size="small" variant="text" onClick={handleDownloadPatientTemplate}>
-                {t("patients.downloadPatientTemplate")}
-              </Button>
-              <Button size="small" variant="text" onClick={handleDownloadLabTemplate}>
-                {t("patients.downloadLabTemplate")}
-              </Button>
-            </Stack>
+              {t("patients.importMenu")}
+            </Button>
+            <Menu
+              id="import-menu"
+              anchorEl={importAnchor}
+              open={importMenuOpen}
+              onClose={() => setImportAnchor(null)}
+              slotProps={{ paper: { sx: { mt: 1, minWidth: 280 } } }}
+            >
+              <MenuItem onClick={handleImportPatientsClick} disabled={importing}>
+                <ListItemIcon>
+                  <FileUploadRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText
+                  primary={importing ? t("patients.importing") : t("patients.importPatients")}
+                />
+              </MenuItem>
+              <MenuItem onClick={handleImportLabsClick} disabled={importingLabs}>
+                <ListItemIcon>
+                  <ScienceRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText
+                  primary={importingLabs ? t("patients.labImporting") : t("patients.importLabs")}
+                />
+              </MenuItem>
+              <MenuItem onClick={handleDownloadPatientTemplate}>
+                <ListItemIcon>
+                  <DescriptionRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("patients.downloadPatientTemplate")} />
+              </MenuItem>
+              <MenuItem onClick={handleDownloadLabTemplate}>
+                <ListItemIcon>
+                  <DescriptionRoundedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("patients.downloadLabTemplate")} />
+              </MenuItem>
+            </Menu>
           </Stack>
         }
       />
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
-          <DashboardStatCard label={t("patients.totalRecords")} value={patients.length} accent="primary" />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <DashboardStatCard label={t("patients.loaded")} value={filteredPatients.length} accent="info" />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <DashboardStatCard label={t("patients.status")} value={t("patients.active")} accent="success" />
-        </Grid>
-      </Grid>
+      {/* hidden file inputs triggered programmatically from the Menu items above */}
+      <input
+        ref={patientsFileRef}
+        type="file"
+        hidden
+        accept=".xlsx,.xlsm,.xltx,.xltm"
+        onChange={handleImportFileChange}
+      />
+      <input
+        ref={labsFileRef}
+        type="file"
+        hidden
+        accept=".xlsx,.xlsm,.xltx,.xltm"
+        onChange={handleLabImportFileChange}
+      />
 
-      <Alert
-        severity="info"
-        variant="outlined"
-        sx={{
-          mb: 3,
-          borderRadius: 2,
-          bgcolor: alpha(theme.palette.info.main, 0.06),
-          borderColor: alpha(theme.palette.info.main, 0.22),
-          "& .MuiAlert-message": { width: "100%" },
-        }}
-        className="mq-animate-fade-up-delay"
-      >
-        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
-          {t("patients.tipsTitle")}
-        </Typography>
-        <Stack spacing={0.65} sx={{ pl: 0.25 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
-            <Box component="span" sx={{ color: "info.main", fontWeight: 800, mt: 0.15 }}>
-              ·
-            </Box>
-            {t("patients.tip1")}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
-            <Box component="span" sx={{ color: "info.main", fontWeight: 800, mt: 0.15 }}>
-              ·
-            </Box>
-            {t("patients.tip2")}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
-            <Box component="span" sx={{ color: "info.main", fontWeight: 800, mt: 0.15 }}>
-              ·
-            </Box>
-            {t("patients.tip3")}
-          </Typography>
-        </Stack>
-      </Alert>
+      <Box sx={{ display: "grid", gap: 2.25, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, mb: 3 }}>
+        <KpiCard
+          label={t("patients.totalRecords")}
+          value={patients.length}
+          tone="primary"
+        />
+        <KpiCard
+          label={t("patients.statusLabel")}
+          value={highRiskCount}
+          tone={highRiskCount > 0 ? "warning" : "success"}
+          hint={
+            highRiskCount > 0
+              ? t("dashboard.attentionNeeded")
+              : t("dashboard.allStable")
+          }
+        />
+        <KpiCard
+          label={t("patients.loaded")}
+          value={filteredPatients.length}
+          tone="info"
+          hint={
+            search
+              ? t("patients.filteredCount", {
+                  filtered: filteredPatients.length,
+                  total: patients.length,
+                })
+              : t("patients.totalCount", { count: patients.length })
+          }
+        />
+      </Box>
 
-      <Alert
-        severity="success"
-        variant="outlined"
-        sx={{
-          mb: 3,
-          borderRadius: 2,
-          bgcolor: alpha(theme.palette.success.main, 0.05),
-          borderColor: alpha(theme.palette.success.main, 0.2),
-        }}
-      >
-        <Typography variant="body2" color="text.secondary">
-          {`${t("patients.patientRecord")}: ${t("detail.overview")}, ${t("detail.labs")}, ${t("detail.assessments")}.`}
-        </Typography>
-      </Alert>
-
-      <Box sx={{ mb: 3 }}>
-        <SearchFilterBar>
-          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-            {t("patients.searchTitle")}
-          </Typography>
-          <TextField
-            fullWidth
-            placeholder={t("patients.searchPlaceholder")}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            InputProps={{
-              startAdornment: <InputAdornment position="start">🔎</InputAdornment>,
-            }}
-          />
-        </SearchFilterBar>
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          fullWidth
+          placeholder={t("patients.searchPlaceholder")}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchRoundedIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <Tooltip title={t("patients.clearSearch")}>
+                    <IconButton
+                      size="small"
+                      onClick={() => setSearch("")}
+                      aria-label={t("patients.clearSearch")}
+                    >
+                      <ClearRoundedIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </InputAdornment>
+              ) : null,
+            },
+          }}
+        />
       </Box>
 
       {importResult ? (
-        <SectionCard title={t("patients.importSummary")} contentSx={{ mb: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                {t("patients.importSummary")}
-              </Typography>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 2 }}>
-                <Chip label={`${t("patients.created")}: ${importResult.created || 0}`} color="success" />
-                <Chip label={`${t("patients.skipped")}: ${importResult.skipped || 0}`} color="warning" />
-                <Chip
-                  label={`${t("patients.errorsCount")}: ${importResult.errors?.length || 0}`}
-                  color={importResult.errors?.length ? "error" : "default"}
-                />
-              </Stack>
-
-              {importResult.imported_patients?.length ? (
-                <Box sx={{ mb: importResult.errors?.length ? 2 : 0 }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    {t("patients.importedPatients")}
-                  </Typography>
-                  <Stack spacing={1}>
-                    {importResult.imported_patients.slice(0, 5).map((patient) => (
-                      <Typography key={patient.id} variant="body2">
-                        <strong>{patient.patient_code}</strong> - {patient.full_name}
-                      </Typography>
-                    ))}
-                  </Stack>
-                </Box>
-              ) : null}
-
-              {importResult.errors?.length ? (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  {importResult.errors.join(" ")}
-                </Alert>
-              ) : null}
-        </SectionCard>
+        <Alert
+          severity={importResult.errors?.length ? "warning" : "success"}
+          onClose={() => setImportResult(null)}
+          sx={{ mb: 2 }}
+        >
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+            {t("patients.importSummary")}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
+            <Chip
+              size="small"
+              label={`${t("patients.created")}: ${importResult.created || 0}`}
+              color="success"
+              variant="outlined"
+            />
+            <Chip
+              size="small"
+              label={`${t("patients.skipped")}: ${importResult.skipped || 0}`}
+              color="warning"
+              variant="outlined"
+            />
+            {importResult.errors?.length ? (
+              <Chip
+                size="small"
+                label={`${t("patients.errorsCount")}: ${importResult.errors.length}`}
+                color="error"
+                variant="outlined"
+              />
+            ) : null}
+          </Stack>
+          {importResult.errors?.length ? (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              {importResult.errors.join(" ")}
+            </Typography>
+          ) : null}
+        </Alert>
       ) : null}
 
       {labImportResult ? (
-        <SectionCard title={t("patients.labImportSummary")} contentSx={{ mb: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                {t("patients.labImportSummary")}
-              </Typography>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 2 }}>
-                <Chip
-                  label={`${t("patients.labResultsCreated")}: ${labImportResult.created_results || 0}`}
-                  color="success"
-                />
-                <Chip
-                  label={`${t("patients.labValuesCreated")}: ${labImportResult.created_values || 0}`}
-                  color="info"
-                />
-                <Chip label={`${t("patients.skipped")}: ${labImportResult.skipped || 0}`} color="warning" />
-              </Stack>
-              {labImportResult.errors?.length ? (
-                <Alert severity="warning">{labImportResult.errors.join(" ")}</Alert>
-              ) : null}
-        </SectionCard>
+        <Alert
+          severity={labImportResult.errors?.length ? "warning" : "success"}
+          onClose={() => setLabImportResult(null)}
+          sx={{ mb: 2 }}
+        >
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+            {t("patients.labImportSummary")}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
+            <Chip
+              size="small"
+              label={`${t("patients.labResultsCreated")}: ${labImportResult.created_results || 0}`}
+              color="success"
+              variant="outlined"
+            />
+            <Chip
+              size="small"
+              label={`${t("patients.labValuesCreated")}: ${labImportResult.created_values || 0}`}
+              color="info"
+              variant="outlined"
+            />
+            <Chip
+              size="small"
+              label={`${t("patients.skipped")}: ${labImportResult.skipped || 0}`}
+              color="warning"
+              variant="outlined"
+            />
+          </Stack>
+          {labImportResult.errors?.length ? (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              {labImportResult.errors.join(" ")}
+            </Typography>
+          ) : null}
+        </Alert>
       ) : null}
 
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          {t("patients.records")}
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          {t("patients.browse")}
-        </Typography>
-      </Box>
-
-      {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", mt: 8 }}>
-          <CircularProgress />
-        </Box>
-      ) : filteredPatients.length === 0 ? (
-        <Card
-          sx={{
-            overflow: "hidden",
-            background: `linear-gradient(165deg, ${alpha(theme.palette.primary.main, 0.07)} 0%, ${theme.palette.background.paper} 42%)`,
-          }}
-        >
-          <CardContent sx={{ py: 5, px: { xs: 2, sm: 4 } }}>
-            <EmptyWorkspaceIllustration />
-            <Typography variant="h6" align="center" fontWeight={700} sx={{ mb: 1 }}>
-              {patients.length === 0 ? t("patients.emptyTitle") : t("patients.emptySearchTitle")}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 420, mx: "auto", mb: 1.5 }}>
-              {patients.length === 0 ? t("patients.emptySubtitle") : t("patients.emptySearchSubtitle")}
-            </Typography>
-            {patients.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 440, mx: "auto" }}>
-                {t("patients.emptyHintImport")}
-              </Typography>
-            ) : null}
-          </CardContent>
-        </Card>
+      {!loading && filteredPatients.length === 0 ? (
+        <EmptyState
+          title={
+            patients.length === 0
+              ? t("patients.emptyTitle")
+              : t("patients.emptySearchTitle")
+          }
+          description={
+            patients.length === 0
+              ? t("patients.emptySubtitle")
+              : t("patients.emptySearchSubtitle")
+          }
+          actions={
+            patients.length === 0 ? (
+              <Button
+                variant="contained"
+                startIcon={<AddRoundedIcon />}
+                onClick={handleOpenAddDialog}
+              >
+                {t("patients.addPatient")}
+              </Button>
+            ) : (
+              <Button
+                variant="outlined"
+                startIcon={<ClearRoundedIcon />}
+                onClick={() => setSearch("")}
+              >
+                {t("patients.clearSearch")}
+              </Button>
+            )
+          }
+        />
       ) : (
-        <Grid container spacing={2.5}>
-            {filteredPatients.map((patient) => (
-              <Grid item xs={12} md={6} lg={4} key={patient.id}>
-                <Card
-                  sx={{
-                    height: "100%",
-                    display: "flex",
-                    flexDirection: "column",
-                    transition: "border-color 0.18s ease, box-shadow 0.18s ease",
-                    "&:hover": {
-                      borderColor: alpha(theme.palette.primary.main, 0.35),
-                      boxShadow: `0 10px 28px ${alpha(theme.palette.primary.main, 0.08)}`,
-                    },
-                  }}
-                >
-                  <CardContent
-                    sx={{
-                      p: 3,
-                      display: "flex",
-                      flexDirection: "column",
-                      height: "100%",
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        gap: 2,
-                        mb: 2,
-                      }}
-                    >
-                      <Stack direction="row" spacing={1.75} sx={{ minWidth: 0, flex: 1 }} alignItems="flex-start">
-                        <Box
-                          sx={{
-                            width: 48,
-                            height: 48,
-                            borderRadius: 2,
-                            flexShrink: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontWeight: 800,
-                            fontSize: "0.9rem",
-                            letterSpacing: "0.02em",
-                            color: "primary.dark",
-                            bgcolor: alpha(theme.palette.primary.main, 0.14),
-                            border: "1px solid",
-                            borderColor: alpha(theme.palette.primary.main, 0.22),
-                          }}
-                          aria-hidden
-                        >
-                          {initialsFromFullName(patient.full_name)}
-                        </Box>
-                        <Box sx={{ minWidth: 0, flex: 1 }}>
-                          <Typography
-                            variant="h6"
-                            noWrap
-                            title={patient.full_name}
-                            sx={{
-                              fontWeight: 700,
-                              lineHeight: 1.2,
-                              mb: 1,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              height: 34,
-                            }}
-                          >
-                            {patient.full_name}
-                          </Typography>
-
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{
-                              lineHeight: 1.2,
-                              height: 22,
-                            }}
-                          >
-                            {t("patients.profileOverview")}
-                          </Typography>
-                        </Box>
-                      </Stack>
-
-                      <Chip
-                        label={patient.patient_code || t("patients.noId")}
-                        color="primary"
-                        variant="outlined"
-                        sx={{ flexShrink: 0 }}
-                      />
-                    </Box>
-
-                    <Box
-                      sx={{
-                        display: "grid",
-                        gap: 1.1,
-                        flexGrow: 1,
-                      }}
-                    >
-                      <Typography variant="body2">
-                        <strong>{t("patients.age")}:</strong>{" "}
-                        {patient.age ?? t("common.noData")}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>{t("patients.sex")}:</strong>{" "}
-                        {getSexLabel(patient.sex)}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>{t("patients.statusLabel")}:</strong>{" "}
-                        <StatusChip
-                          label={patient.status_label || t(`detail.statusOptions.${patient.status}`)}
-                          status={patient.status}
-                        />
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>{t("patients.nextVisitCard")}:</strong>{" "}
-                        {patient.next_visit_date ? patient.next_visit_date : t("patients.nextVisitNone")}
-                      </Typography>
-                    </Box>
-
-                    <Stack spacing={1} sx={{ mt: 2.5 }}>
-                      <Button
-                        component={Link}
-                        to={`/patients/${patient.id}`}
-                        variant="contained"
-                        fullWidth
-                        sx={{ borderRadius: 10, py: 1.15 }}
-                      >
-                        {t("patients.openProfile")}
-                      </Button>
-                      <Button
-                        component={Link}
-                        to={`/patients/${patient.id}/questionnaires`}
-                        variant="outlined"
-                        fullWidth
-                        sx={{ borderRadius: 10 }}
-                      >
-                        {t("detail.openQuestionnaires")}
-                      </Button>
-                      <Button
-                        color="error"
-                        variant="text"
-                        fullWidth
-                        onClick={() => handleDeletePatient(patient.id)}
-                      >
-                        {t("detail.deletePatient")}
-                      </Button>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-        </Grid>
+        <DataTable
+          columns={columns}
+          rows={filteredPatients}
+          loading={loading}
+          ariaLabel={t("patients.records")}
+          onRowClick={(row) => navigate(`/patients/${row.id}`)}
+          defaultSort={{ id: "patient", direction: "asc" }}
+        />
       )}
-      <Snackbar
-        open={feedback.open}
-        autoHideDuration={2500}
-        onClose={() => setFeedback((prev) => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert
-          severity={feedback.severity}
-          sx={{ width: "100%" }}
-          onClose={() => setFeedback((prev) => ({ ...prev, open: false }))}
-        >
-          {feedback.message}
-        </Alert>
-      </Snackbar>
 
       <Dialog open={addDialogOpen} onClose={handleCloseAddDialog} fullWidth maxWidth="sm">
         <DialogTitle>{t("patients.addPatient")}</DialogTitle>
@@ -739,7 +753,7 @@ function PatientsPage() {
               fullWidth
               value={newPatient.next_visit_date}
               onChange={(e) => handleNewPatientFieldChange("next_visit_date", e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
           </Stack>
         </DialogContent>

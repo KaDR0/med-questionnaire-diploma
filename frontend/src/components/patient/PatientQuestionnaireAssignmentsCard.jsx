@@ -241,7 +241,7 @@ export default function PatientQuestionnaireAssignmentsCard({ patientId, showFee
               label={t("detail.assignQuestionnaireLabel")}
               value={form.questionnaire_id}
               onChange={(e) => setForm((p) => ({ ...p, questionnaire_id: e.target.value }))}
-              SelectProps={{ displayEmpty: true }}
+              slotProps={{ select: { displayEmpty: true } }}
             >
               <MenuItem value="">
                 <em>{t("detail.assignQuestionnairePlaceholder")}</em>
@@ -259,7 +259,7 @@ export default function PatientQuestionnaireAssignmentsCard({ patientId, showFee
               label={t("detail.assignDueDate")}
               value={form.due_date}
               onChange={(e) => setForm((p) => ({ ...p, due_date: e.target.value }))}
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
             <TextField
               fullWidth

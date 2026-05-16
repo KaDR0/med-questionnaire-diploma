@@ -1,44 +1,52 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link as RouterLink } from "react-router-dom";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  FormControl,
+  FormControlLabel,
+  LinearProgress,
+  MenuItem,
+  Paper,
+  Radio,
+  RadioGroup,
+  Stack,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from "@mui/material";
+import { alpha, useTheme } from "@mui/material/styles";
+import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
+
 import api from "../api/axios";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  CircularProgress,
-  TextField,
-  Button,
-  MenuItem,
-  Snackbar,
-  Alert,
-  Paper,
-  Chip,
-  Stack,
-  FormControl,
-  FormControlLabel,
-  Radio,
-  RadioGroup,
-} from "@mui/material";
-import { alpha } from "@mui/material/styles";
+import useToast from "../utils/useToast";
 import PageHeader from "../components/ui/PageHeader";
-import SectionCard from "../components/ui/SectionCard";
+import { CardSkeleton } from "../components/ui/LoadingSkeleton";
+import EmptyState from "../components/ui/EmptyState";
 
 function QuestionnaireFormPage() {
   const { id, questionnaireId } = useParams();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
+  const toast = useToast();
+  const theme = useTheme();
 
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [createdAssessmentId, setCreatedAssessmentId] = useState(null);
 
   useEffect(() => {
     api
@@ -55,14 +63,17 @@ function QuestionnaireFormPage() {
   }, [questionnaireId]);
 
   const answeredCount = useMemo(() => {
-    return Object.values(answers).filter((value) => String(value).trim() !== "").length;
+    return Object.values(answers).filter(
+      (value) => String(value).trim() !== ""
+    ).length;
   }, [answers]);
 
+  const totalCount = questions.length;
+  const progressPct = totalCount > 0 ? Math.round((answeredCount / totalCount) * 100) : 0;
+  const allAnswered = totalCount > 0 && answeredCount === totalCount;
+
   const handleChange = (questionId, value) => {
-    setAnswers((prev) => ({
-      ...prev,
-      [questionId]: value,
-    }));
+    setAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
   const isPatientUser = user?.role === "patient";
@@ -75,35 +86,35 @@ function QuestionnaireFormPage() {
       const payload = {
         patient_id: Number(id),
         questionnaire_id: Number(questionnaireId),
-        answers: answers,
+        answers,
       };
       if (!isPatientUser) {
         payload.doctor_id = user?.id || null;
       }
 
       const response = await api.post("assessments/submit/", payload);
-
-      setCreatedAssessmentId(response.data.assessment_id);
-      setSnackbarOpen(true);
+      const assessmentId = response.data.assessment_id;
+      toast.success(
+        `${t("form.submitSuccess")}${assessmentId ? ` #${assessmentId}` : ""}`
+      );
 
       setTimeout(() => {
         if (isPatientUser) {
           navigate("/patient/questionnaires");
         } else {
-          navigate(`/patients/${id}/assessments/${response.data.assessment_id}`);
+          navigate(`/patients/${id}/assessments/${assessmentId}`);
         }
-      }, 1200);
+      }, 900);
     } catch (error) {
       console.error("Submit error:", error);
-      const apiErr = error?.response?.data?.error || error?.response?.data?.detail;
-      setSubmitError(apiErr || t("form.submitError"));
+      const apiErr =
+        error?.response?.data?.error || error?.response?.data?.detail;
+      const msg = apiErr || t("form.submitError");
+      setSubmitError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
   };
 
   const getLocalizedQuestionText = (question) => {
@@ -120,6 +131,7 @@ function QuestionnaireFormPage() {
     if (qtype === "yesno") return `${t("form.yes")} / ${t("form.no")}`;
     if (qtype === "number") return t("form.number");
     if (qtype === "text") return t("form.text");
+    if (qtype === "single_choice") return t("form.singleChoice", { defaultValue: "Single choice" });
     return qtype;
   };
 
@@ -128,17 +140,30 @@ function QuestionnaireFormPage() {
 
     if (question.qtype === "yesno") {
       return (
-        <TextField
-          select
-          fullWidth
-          label={t("form.answer")}
+        <ToggleButtonGroup
+          exclusive
           value={value}
-          onChange={(e) => handleChange(question.id, e.target.value)}
+          onChange={(_, val) => {
+            if (val !== null) handleChange(question.id, val);
+          }}
+          sx={{
+            "& .MuiToggleButton-root": {
+              flex: 1,
+              py: 1.25,
+              fontWeight: 600,
+              textTransform: "none",
+              borderRadius: 1,
+            },
+          }}
+          fullWidth
         >
-          <MenuItem value="">{t("form.selectAnswer")}</MenuItem>
-          <MenuItem value="yes">{t("form.yes")}</MenuItem>
-          <MenuItem value="no">{t("form.no")}</MenuItem>
-        </TextField>
+          <ToggleButton value="yes" color="primary">
+            {t("form.yes")}
+          </ToggleButton>
+          <ToggleButton value="no" color="primary">
+            {t("form.no")}
+          </ToggleButton>
+        </ToggleButtonGroup>
       );
     }
 
@@ -153,12 +178,30 @@ function QuestionnaireFormPage() {
             {options.map((option, index) => {
               const optionValue = String(option?.value ?? option?.text ?? index);
               const optionLabel = option?.text || optionValue;
+              const selected = String(value) === optionValue;
               return (
                 <FormControlLabel
                   key={`${optionValue}-${index}`}
                   value={optionValue}
                   control={<Radio />}
                   label={optionLabel}
+                  sx={{
+                    m: 0,
+                    mb: 1,
+                    p: 1,
+                    pr: 2,
+                    borderRadius: 1,
+                    border: "1px solid",
+                    borderColor: selected ? "primary.main" : "divider",
+                    bgcolor: selected
+                      ? alpha(theme.palette.primary.main, 0.06)
+                      : "transparent",
+                    transition: "all .15s ease",
+                    "&:hover": {
+                      borderColor: "primary.light",
+                      bgcolor: alpha(theme.palette.primary.main, 0.03),
+                    },
+                  }}
                 />
               );
             })}
@@ -179,169 +222,264 @@ function QuestionnaireFormPage() {
       );
     }
 
+    if (question.qtype === "text") {
+      return (
+        <TextField
+          fullWidth
+          label={t("form.answer")}
+          value={value}
+          onChange={(e) => handleChange(question.id, e.target.value)}
+          multiline
+          minRows={3}
+        />
+      );
+    }
+
     return (
       <TextField
+        select
         fullWidth
         label={t("form.answer")}
         value={value}
         onChange={(e) => handleChange(question.id, e.target.value)}
-        multiline={question.qtype === "text"}
-        minRows={question.qtype === "text" ? 3 : 1}
-      />
+      >
+        <MenuItem value="">{t("form.selectAnswer")}</MenuItem>
+        <MenuItem value="yes">{t("form.yes")}</MenuItem>
+        <MenuItem value="no">{t("form.no")}</MenuItem>
+      </TextField>
     );
   };
 
   return (
-    <Box>
+    <Box sx={{ maxWidth: 880, mx: "auto", pb: { xs: 12, md: 14 } }}>
       <PageHeader
         title={t("form.title")}
         subtitle={t("form.subtitle")}
         actions={
-          <Stack direction="row" spacing={1}>
-            <Chip label={`${t("form.patientId")}: ${id}`} color="primary" variant="outlined" />
-            <Chip label={`${t("form.answered")}: ${answeredCount}/${questions.length}`} color="primary" variant="outlined" />
-          </Stack>
-        }
-      />
-
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: { xs: "stretch", md: "center" },
-            flexDirection: { xs: "column", md: "row" },
-            gap: 2,
-            mb: 3,
-          }}
-        >
-          <Box>
-            <Typography variant="h5" gutterBottom>
-              {t("form.questions")}
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              {t("form.fill")}
-            </Typography>
-          </Box>
-
           <Button
-            component={Link}
-            to={isPatientUser ? "/patient/questionnaires" : `/patients/${id}/questionnaires`}
+            component={RouterLink}
+            to={
+              isPatientUser
+                ? "/patient/questionnaires"
+                : `/patients/${id}/questionnaires`
+            }
             variant="outlined"
+            startIcon={<ArrowBackRoundedIcon />}
           >
             {t("form.back")}
           </Button>
-        </Box>
+        }
+      />
 
-        {loading ? (
-          <Box sx={{ display: "flex", justifyContent: "center", mt: 8 }}>
-            <CircularProgress />
-          </Box>
-        ) : questions.length === 0 ? (
-          <Card>
-            <CardContent sx={{ py: 5 }}>
-              <Typography align="center" color="text.secondary">
-                {t("form.none")}
-              </Typography>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {questions.map((question) => (
-            <SectionCard
-                key={question.id}
-              contentSx={{ mb: 3 }}
-              >
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: 2,
-                      mb: 2,
-                    }}
-                  >
-                    <Box>
-                      <Typography variant="h6" gutterBottom>
-                        {question.order}. {getLocalizedQuestionText(question)}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {t("form.answerType")}: {getQuestionTypeLabel(question.qtype)}
-                      </Typography>
-                    </Box>
-
-                    <Chip
-                      label={getQuestionTypeLabel(question.qtype)}
-                      color="primary"
-                      variant="outlined"
-                      size="small"
-                    />
-                </Box>
-
-                {renderField(question)}
-            </SectionCard>
-            ))}
-
-            {submitError && (
-              <Alert severity="error" sx={{ mb: 3 }}>
-                {submitError}
-              </Alert>
-            )}
-
-            <Box
-              sx={{
-                position: "sticky",
-                bottom: 16,
-                zIndex: 5,
-              }}
-            >
-              <Paper
-                elevation={0}
-                sx={(theme) => ({
-                  p: 2,
-                  borderRadius: 4,
-                  border: "1px solid",
-                  borderColor: "divider",
-                  backgroundColor: alpha(theme.palette.background.paper, 0.92),
-                  backdropFilter: "blur(8px)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: { xs: "stretch", md: "center" },
-                  flexDirection: { xs: "column", md: "row" },
-                  gap: 2,
-                })}
-              >
-                <Box>
-                  <Typography variant="subtitle1" fontWeight={700}>
-                    {t("form.ready")}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {t("form.completed")}: {answeredCount} / {questions.length}
-                  </Typography>
-                </Box>
-
-                <Button
-                  variant="contained"
-                  size="large"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
-                  {submitting ? t("form.submitting") : t("form.submit")}
-                </Button>
-              </Paper>
-            </Box>
-          </>
-        )}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={1200}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      <Card
+        sx={{
+          mb: 2.5,
+          background: `linear-gradient(135deg, ${alpha(
+            theme.palette.primary.main,
+            0.06
+          )} 0%, ${alpha(theme.palette.background.paper, 0)} 70%)`,
+        }}
       >
-        <Alert onClose={handleCloseSnackbar} severity="success" sx={{ width: "100%" }}>
-          {t("form.submitSuccess")}
-          {createdAssessmentId ? ` (#${createdAssessmentId})` : ""}
-        </Alert>
-      </Snackbar>
+        <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            sx={{ mb: 1.5 }}
+          >
+            <Box>
+              <Typography variant="h6" sx={{ mb: 0.25 }}>
+                {t("form.questions")}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t("form.fill")}
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1}>
+              <Chip
+                label={`${t("form.patientId")}: ${id}`}
+                size="small"
+                variant="outlined"
+              />
+              <Chip
+                label={`${answeredCount} / ${totalCount}`}
+                size="small"
+                color={allAnswered ? "success" : "primary"}
+                icon={allAnswered ? <CheckCircleRoundedIcon /> : undefined}
+              />
+            </Stack>
+          </Stack>
+          <LinearProgress
+            variant="determinate"
+            value={progressPct}
+            sx={{
+              height: 8,
+              borderRadius: 4,
+              bgcolor: alpha(theme.palette.primary.main, 0.1),
+              "& .MuiLinearProgress-bar": { borderRadius: 4 },
+            }}
+          />
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ mt: 1, display: "block" }}
+          >
+            {progressPct}% · {t("form.completed")}: {answeredCount}/{totalCount}
+          </Typography>
+        </CardContent>
+      </Card>
+
+      {loading ? (
+        <Stack spacing={2.5}>
+          <CardSkeleton lines={3} />
+          <CardSkeleton lines={3} />
+          <CardSkeleton lines={3} />
+        </Stack>
+      ) : questions.length === 0 ? (
+        <Card>
+          <CardContent>
+            <EmptyState
+              icon={<HelpOutlineRoundedIcon sx={{ fontSize: 48, color: "text.disabled" }} />}
+              title={t("form.none")}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <Stack spacing={2.25}>
+          {questions.map((question) => {
+            const isAnswered =
+              String(answers[question.id] ?? "").trim() !== "";
+            return (
+              <Card
+                key={question.id}
+                sx={{
+                  borderLeft: "3px solid",
+                  borderLeftColor: isAnswered ? "success.main" : "divider",
+                  transition: "border-color .2s ease",
+                }}
+              >
+                <CardContent sx={{ p: { xs: 2.25, md: 2.75 } }}>
+                  <Stack
+                    direction="row"
+                    spacing={2}
+                    alignItems="flex-start"
+                    sx={{ mb: 2 }}
+                  >
+                    <Box
+                      sx={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        bgcolor: isAnswered
+                          ? "success.main"
+                          : alpha(theme.palette.primary.main, 0.1),
+                        color: isAnswered ? "common.white" : "primary.main",
+                        fontWeight: 700,
+                        fontSize: 14,
+                      }}
+                    >
+                      {isAnswered ? (
+                        <CheckCircleRoundedIcon fontSize="small" />
+                      ) : (
+                        question.order
+                      )}
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography
+                        variant="subtitle1"
+                        sx={{ fontWeight: 600, lineHeight: 1.4, mb: 0.5 }}
+                      >
+                        {getLocalizedQuestionText(question)}
+                      </Typography>
+                      <Chip
+                        label={getQuestionTypeLabel(question.qtype)}
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 22, fontSize: "0.72rem" }}
+                      />
+                    </Box>
+                  </Stack>
+                  {renderField(question)}
+                </CardContent>
+              </Card>
+            );
+          })}
+
+          {submitError ? (
+            <Alert
+              severity="error"
+              onClose={() => setSubmitError("")}
+              sx={{ mt: 1 }}
+            >
+              {submitError}
+            </Alert>
+          ) : null}
+        </Stack>
+      )}
+
+      {!loading && questions.length > 0 ? (
+        <Box
+          sx={{
+            position: "sticky",
+            bottom: 16,
+            zIndex: 5,
+            mt: 3,
+          }}
+        >
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 1.75, md: 2.25 },
+              borderRadius: 2,
+              border: "1px solid",
+              borderColor: "divider",
+              backgroundColor: alpha(theme.palette.background.paper, 0.96),
+              backdropFilter: "blur(8px)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: { xs: "stretch", md: "center" },
+              flexDirection: { xs: "column", md: "row" },
+              gap: 1.5,
+              boxShadow: "0 -4px 20px -8px rgba(15, 23, 42, 0.12)",
+            }}
+          >
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1.25 }}>
+                {t("form.ready")}
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.25 }}>
+                <Typography variant="body2" color="text.secondary">
+                  {t("form.completed")}: {answeredCount} / {totalCount}
+                </Typography>
+                {allAnswered ? (
+                  <Chip
+                    size="small"
+                    color="success"
+                    label="100%"
+                    icon={<CheckCircleRoundedIcon />}
+                    sx={{ height: 22 }}
+                  />
+                ) : null}
+              </Stack>
+            </Box>
+
+            <Button
+              variant="contained"
+              size="large"
+              endIcon={<SendRoundedIcon />}
+              onClick={handleSubmit}
+              disabled={submitting || answeredCount === 0}
+            >
+              {submitting ? t("form.submitting") : t("form.submit")}
+            </Button>
+          </Paper>
+        </Box>
+      ) : null}
     </Box>
   );
 }

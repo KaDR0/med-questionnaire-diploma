@@ -1,127 +1,269 @@
-import { Box, Button, Divider, Paper, Stack, Typography } from "@mui/material";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Box, Drawer } from "@mui/material";
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../context/AuthContext";
-import LogoLockup from "./brand/LogoLockup";
-import LanguageSwitcher from "./LanguageSwitcher";
 
-const navByRole = {
-  pending: [
-    { id: "pending", labelKey: "navbar.awaitingApproval", to: "/awaiting-approval" },
-    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
-  ],
-  doctor: [
-    { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
-    { id: "patients", labelKey: "navbar.patients", to: "/patients" },
-    { id: "myQuestionnaires", labelKey: "navbar.myQuestionnaires", to: "/questionnaires/my" },
-    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
-  ],
-  chief_doctor: [
-    { id: "dashboard", labelKey: "navbar.dashboard", to: "/" },
-    { id: "patients", labelKey: "navbar.patients", to: "/patients" },
-    { id: "userRoles", labelKey: "navbar.userRoles", to: "/users/roles" },
-    { id: "pendingQuestionnaires", labelKey: "navbar.pendingQuestionnaires", to: "/questionnaires/pending" },
-    { id: "questionnaireSources", labelKey: "navbar.questionnaireSources", to: "/questionnaires/my" },
-    { id: "archive", labelKey: "navbar.archive", to: "/questionnaires/archive" },
-    { id: "profile", labelKey: "navbar.profile", to: "/profile" },
-  ],
-};
+import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
+import PeopleAltRoundedIcon from "@mui/icons-material/PeopleAltRounded";
+import AssignmentIndRoundedIcon from "@mui/icons-material/AssignmentIndRounded";
+import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
+import RuleRoundedIcon from "@mui/icons-material/RuleRounded";
+import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
+import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
+import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
+
+import SidebarNav, { SidebarFootnote } from "./ui/SidebarNav";
+import TopBar from "./ui/TopBar";
+
+const SIDEBAR_WIDTH = 264;
+
+function buildNavGroups({ role, t }) {
+  if (role === "pending") {
+    return [
+      {
+        id: "account",
+        label: t("navbar.groups.account"),
+        items: [
+          {
+            id: "awaiting",
+            label: t("navbar.awaitingApproval"),
+            to: "/awaiting-approval",
+            icon: <HourglassEmptyRoundedIcon />,
+          },
+          {
+            id: "profile",
+            label: t("navbar.profile"),
+            to: "/profile",
+            icon: <AssignmentIndRoundedIcon />,
+          },
+        ],
+      },
+    ];
+  }
+
+  if (role === "chief_doctor") {
+    return [
+      {
+        id: "overview",
+        label: t("navbar.groups.overview"),
+        items: [
+          {
+            id: "dashboard",
+            label: t("navbar.dashboard"),
+            to: "/",
+            icon: <DashboardRoundedIcon />,
+          },
+        ],
+      },
+      {
+        id: "clinical",
+        label: t("navbar.groups.clinical"),
+        items: [
+          {
+            id: "patients",
+            label: t("navbar.patients"),
+            to: "/patients",
+            icon: <PeopleAltRoundedIcon />,
+            matchPaths: ["/patients/:id", "/patients/:id/*"],
+          },
+          {
+            id: "questionnaireSources",
+            label: t("navbar.questionnaireSources"),
+            to: "/questionnaires/my",
+            icon: <FactCheckRoundedIcon />,
+            matchPaths: ["/questionnaires/create", "/questionnaires/:id/edit", "/questionnaires/:id"],
+          },
+        ],
+      },
+      {
+        id: "admin",
+        label: t("navbar.groups.admin"),
+        items: [
+          {
+            id: "pendingQuestionnaires",
+            label: t("navbar.pendingQuestionnaires"),
+            to: "/questionnaires/pending",
+            icon: <RuleRoundedIcon />,
+            matchPaths: ["/questionnaires/review/:id"],
+          },
+          {
+            id: "archive",
+            label: t("navbar.archive"),
+            to: "/questionnaires/archive",
+            icon: <Inventory2RoundedIcon />,
+          },
+          {
+            id: "userRoles",
+            label: t("navbar.userRoles"),
+            to: "/users/roles",
+            icon: <GroupsRoundedIcon />,
+          },
+          {
+            id: "auditLog",
+            label: t("navbar.auditLog"),
+            to: "/audit-log",
+            icon: <HistoryRoundedIcon />,
+          },
+        ],
+      },
+      {
+        id: "account",
+        label: t("navbar.groups.account"),
+        items: [
+          {
+            id: "profile",
+            label: t("navbar.profile"),
+            to: "/profile",
+            icon: <AssignmentIndRoundedIcon />,
+          },
+        ],
+      },
+    ];
+  }
+
+  // doctor (default)
+  return [
+    {
+      id: "overview",
+      label: t("navbar.groups.overview"),
+      items: [
+        {
+          id: "dashboard",
+          label: t("navbar.dashboard"),
+          to: "/",
+          icon: <DashboardRoundedIcon />,
+        },
+      ],
+    },
+    {
+      id: "clinical",
+      label: t("navbar.groups.clinical"),
+      items: [
+        {
+          id: "patients",
+          label: t("navbar.patients"),
+          to: "/patients",
+          icon: <PeopleAltRoundedIcon />,
+          matchPaths: ["/patients/:id", "/patients/:id/*"],
+        },
+        {
+          id: "myQuestionnaires",
+          label: t("navbar.myQuestionnaires"),
+          to: "/questionnaires/my",
+          icon: <FactCheckRoundedIcon />,
+          matchPaths: ["/questionnaires/create", "/questionnaires/:id/edit", "/questionnaires/:id"],
+        },
+      ],
+    },
+    {
+      id: "account",
+      label: t("navbar.groups.account"),
+      items: [
+        {
+          id: "profile",
+          label: t("navbar.profile"),
+          to: "/profile",
+          icon: <AssignmentIndRoundedIcon />,
+        },
+      ],
+    },
+  ];
+}
+
+function roleLabelOf(role, t) {
+  if (role === "chief_doctor") return `${t("navbar.role")}: ${t("navbar.role")} · Chief`;
+  if (role === "doctor") return `${t("navbar.role")}: ${t("navbar.doctorPrefix")}`;
+  if (role === "pending") return t("navbar.awaitingApproval");
+  return role;
+}
 
 function AppShell({ children }) {
   const location = useLocation();
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const role = user?.role || "pending";
-  const navItems = navByRole[role] || navByRole.pending;
+  const groups = buildNavGroups({ role, t });
+
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Close the mobile drawer whenever the route changes. Drawer state is local UI;
+  // location is the external trigger, so a setState-in-effect pattern is correct here.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  const sidebar = (
+    <SidebarNav
+      groups={groups}
+      homeTo={role === "pending" ? "/awaiting-approval" : "/"}
+      footer={<SidebarFootnote>{t("navbar.workspaceFootnote")}</SidebarFootnote>}
+    />
+  );
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        bgcolor: "background.default",
-        display: "grid",
-        gridTemplateColumns: { xs: "1fr", lg: "minmax(220px, 260px) 1fr" },
-      }}
-    >
-      <Paper
-        square
-        elevation={0}
+    <Box sx={{ minHeight: "100vh", display: "flex", bgcolor: "background.default" }}>
+      <Box
+        component="aside"
         sx={{
-          borderRight: { lg: "1px solid" },
-          borderColor: { lg: "divider" },
+          width: SIDEBAR_WIDTH,
+          flexShrink: 0,
+          display: { xs: "none", lg: "block" },
+          position: "sticky",
+          top: 0,
+          height: "100vh",
           bgcolor: "background.paper",
-          p: 2.25,
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
-          position: { lg: "sticky" },
-          top: { lg: 0 },
-          height: { lg: "100vh" },
-          zIndex: 5,
-          boxShadow: { lg: (theme) => `4px 0 24px ${theme.palette.mode === "light" ? "rgba(19, 36, 40, 0.06)" : "transparent"}` },
+          borderRight: "1px solid",
+          borderColor: "divider",
         }}
       >
-        <Box className="mq-animate-fade-up">
-          <LogoLockup variant="sidebar" caption="subtitle" to="/" />
+        {sidebar}
+      </Box>
+
+      <Drawer
+        variant="temporary"
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        ModalProps={{ keepMounted: true }}
+        sx={{
+          display: { xs: "block", lg: "none" },
+          "& .MuiDrawer-paper": { width: SIDEBAR_WIDTH, boxSizing: "border-box" },
+        }}
+      >
+        {sidebar}
+      </Drawer>
+
+      <Box
+        component="main"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <TopBar
+          homeTo={role === "pending" ? "/awaiting-approval" : "/"}
+          user={user}
+          roleLabel={roleLabelOf(role, t)}
+          profileTo="/profile"
+          onLogout={logout}
+          onToggleSidebar={() => setMobileOpen((v) => !v)}
+        />
+        <Box
+          className="mq-workspace-bg"
+          sx={{
+            flex: 1,
+            p: { xs: 2, md: 3 },
+            pb: { xs: 4, md: 5 },
+          }}
+        >
+          <Box sx={{ maxWidth: 1380, mx: "auto", width: "100%", position: "relative", zIndex: 1 }}>
+            {children}
+          </Box>
         </Box>
-
-        <Divider sx={{ borderColor: "divider" }} />
-
-        <Stack spacing={0.5} component="nav" aria-label={t("navbar.mainNav")}>
-          {navItems.map((item) => {
-            const active =
-              location.pathname === item.to ||
-              (String(item.to).startsWith("/patients") && location.pathname.startsWith("/patients"));
-            return (
-              <Button
-                key={item.id}
-                component={Link}
-                to={item.to}
-                variant="text"
-                color="inherit"
-                aria-current={active ? "page" : undefined}
-                sx={{
-                  justifyContent: "flex-start",
-                  py: 1.1,
-                  px: 1.35,
-                  fontWeight: 600,
-                  color: "text.primary",
-                  bgcolor: active ? "action.selected" : "transparent",
-                  borderLeft: "3px solid",
-                  borderLeftColor: active ? "primary.main" : "transparent",
-                  borderRadius: 1.5,
-                  transition: "background-color 0.15s ease, border-color 0.15s ease",
-                  "&:hover": { bgcolor: "action.hover" },
-                }}
-              >
-                {t(item.labelKey)}
-              </Button>
-            );
-          })}
-        </Stack>
-
-        <Divider sx={{ borderColor: "divider" }} />
-
-        <LanguageSwitcher fullWidth showLabel size="small" />
-
-        <Box sx={{ mt: "auto", pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.25, lineHeight: 1.45 }}>
-            {t("navbar.workspaceFootnote")}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1, fontWeight: 600 }}>
-            {t("navbar.doctorPrefix")} {user?.first_name || user?.username || t("profile.doctorFallback")}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-            {t("navbar.role")}: {role}
-          </Typography>
-          <Button variant="outlined" color="inherit" fullWidth onClick={logout} size="small">
-            {t("navbar.logout")}
-          </Button>
-        </Box>
-      </Paper>
-
-      <Box className="mq-workspace-bg" sx={{ p: { xs: 2, md: 3 }, pb: { xs: 4, md: 5 }, minWidth: 0 }}>
-        <Box sx={{ maxWidth: 1380, mx: "auto", width: "100%", position: "relative", zIndex: 1 }}>{children}</Box>
       </Box>
     </Box>
   );

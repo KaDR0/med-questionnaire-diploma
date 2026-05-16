@@ -4,6 +4,11 @@ const primaryMain = "#0b5c6d";
 const ink = "#132428";
 const inkMuted = "#4a5f68";
 
+const surfaceCanvas = "#f5f7fa";
+const surfacePaper = "#ffffff";
+const surfaceSubtle = "#eef2f6";
+const surfaceMuted = "#f1f5f8";
+
 /**
  * Medical UI: calm teal accent, cool neutrals, semantic greens/amber/red for vitals.
  * Typography and spacing tuned for long reading sessions (WCAG-friendly contrast).
@@ -24,17 +29,23 @@ export const appTheme = createTheme({
       contrastText: "#ffffff",
     },
     background: {
-      default: "#e8f0f3",
-      paper: "#fbfdfe",
+      default: surfaceCanvas,
+      paper: surfacePaper,
+    },
+    surface: {
+      canvas: surfaceCanvas,
+      paper: surfacePaper,
+      subtle: surfaceSubtle,
+      muted: surfaceMuted,
     },
     text: {
       primary: ink,
       secondary: inkMuted,
     },
-    divider: "rgba(11, 92, 109, 0.12)",
+    divider: "rgba(19, 36, 40, 0.10)",
     action: {
-      hover: "rgba(11, 92, 109, 0.07)",
-      selected: "rgba(11, 92, 109, 0.11)",
+      hover: "rgba(11, 92, 109, 0.06)",
+      selected: "rgba(11, 92, 109, 0.10)",
       active: "rgba(11, 92, 109, 0.14)",
       focus: "rgba(11, 92, 109, 0.18)",
     },
@@ -92,6 +103,7 @@ export const appTheme = createTheme({
           MozOsxFontSmoothing: "grayscale",
           textRendering: "optimizeLegibility",
           color: theme.palette.text.primary,
+          backgroundColor: theme.palette.background.default,
         }),
       },
     },
@@ -105,8 +117,8 @@ export const appTheme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: ({ theme }) => ({
-          boxShadow: `0 1px 2px ${alpha(ink, 0.04)}, 0 4px 20px ${alpha(ink, 0.03)}`,
-          border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+          boxShadow: `0 1px 2px ${alpha(ink, 0.04)}, 0 4px 18px ${alpha(ink, 0.03)}`,
+          border: `1px solid ${alpha(theme.palette.divider, 1)}`,
           borderRadius: theme.shape.borderRadius,
           transition: theme.transitions.create(["box-shadow", "border-color"], {
             duration: theme.transitions.duration.shorter,
@@ -141,10 +153,22 @@ export const appTheme = createTheme({
         }),
       },
     },
+    MuiIconButton: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          borderRadius: 10,
+          "&:focus-visible": {
+            outline: `2px solid ${alpha(theme.palette.primary.main, 0.5)}`,
+            outlineOffset: 2,
+          },
+        }),
+      },
+    },
     MuiOutlinedInput: {
       styleOverrides: {
         root: ({ theme }) => ({
           borderRadius: 10,
+          backgroundColor: theme.palette.background.paper,
           transition: theme.transitions.create(["border-color", "box-shadow"], {
             duration: theme.transitions.duration.shorter,
           }),
@@ -215,6 +239,186 @@ export const appTheme = createTheme({
             outlineOffset: 2,
             borderRadius: 2,
           },
+        }),
+      },
+    },
+    MuiTabs: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          minHeight: 44,
+          borderBottom: `1px solid ${theme.palette.divider}`,
+        }),
+        indicator: ({ theme }) => ({
+          height: 3,
+          borderRadius: "3px 3px 0 0",
+          backgroundColor: theme.palette.primary.main,
+        }),
+      },
+    },
+    MuiTab: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          textTransform: "none",
+          fontWeight: 600,
+          minHeight: 44,
+          paddingInline: 18,
+          color: theme.palette.text.secondary,
+          "&.Mui-selected": {
+            color: theme.palette.primary.dark,
+          },
+          "&:hover": {
+            color: theme.palette.primary.main,
+            backgroundColor: alpha(theme.palette.primary.main, 0.04),
+          },
+        }),
+      },
+    },
+    MuiTableHead: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          backgroundColor: theme.palette.surface?.subtle || surfaceSubtle,
+          "& .MuiTableCell-root": {
+            fontWeight: 700,
+            color: theme.palette.text.secondary,
+            letterSpacing: "0.02em",
+            fontSize: "0.8125rem",
+            textTransform: "uppercase",
+            borderBottom: `1px solid ${theme.palette.divider}`,
+          },
+        }),
+      },
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          paddingTop: 14,
+          paddingBottom: 14,
+        }),
+      },
+    },
+    MuiTableRow: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          "&:last-child .MuiTableCell-root": {
+            borderBottom: 0,
+          },
+          "&.MuiTableRow-hover:hover": {
+            backgroundColor: theme.palette.action.hover,
+          },
+        }),
+      },
+    },
+    MuiSkeleton: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          backgroundColor: alpha(theme.palette.text.primary, 0.06),
+        }),
+      },
+    },
+    MuiTooltip: {
+      styleOverrides: {
+        tooltip: ({ theme }) => ({
+          backgroundColor: alpha(theme.palette.text.primary, 0.92),
+          color: theme.palette.common.white,
+          fontSize: "0.8125rem",
+          fontWeight: 500,
+          padding: "6px 10px",
+          borderRadius: 8,
+        }),
+        arrow: ({ theme }) => ({
+          color: alpha(theme.palette.text.primary, 0.92),
+        }),
+      },
+    },
+    MuiDialog: {
+      styleOverrides: {
+        paper: ({ theme }) => ({
+          borderRadius: theme.shape.borderRadius * 1.25,
+          boxShadow: `0 12px 48px ${alpha(ink, 0.12)}, 0 2px 6px ${alpha(ink, 0.06)}`,
+        }),
+      },
+    },
+    MuiDialogTitle: {
+      styleOverrides: {
+        root: {
+          fontWeight: 700,
+          fontSize: "1.125rem",
+        },
+      },
+    },
+    MuiDrawer: {
+      styleOverrides: {
+        paper: ({ theme }) => ({
+          backgroundColor: theme.palette.background.paper,
+          borderRight: `1px solid ${theme.palette.divider}`,
+        }),
+      },
+    },
+    MuiMenu: {
+      defaultProps: {
+        elevation: 8,
+      },
+      styleOverrides: {
+        paper: ({ theme }) => ({
+          borderRadius: 10,
+          border: `1px solid ${theme.palette.divider}`,
+          boxShadow: `0 8px 28px ${alpha(ink, 0.10)}, 0 2px 4px ${alpha(ink, 0.05)}`,
+        }),
+      },
+    },
+    MuiMenuItem: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          borderRadius: 6,
+          margin: "2px 4px",
+          minHeight: 36,
+          "&.Mui-selected": {
+            backgroundColor: alpha(theme.palette.primary.main, 0.10),
+          },
+        }),
+      },
+    },
+    MuiListItemButton: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          borderRadius: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          "&.Mui-selected": {
+            backgroundColor: alpha(theme.palette.primary.main, 0.11),
+            "&:hover": {
+              backgroundColor: alpha(theme.palette.primary.main, 0.15),
+            },
+          },
+        }),
+      },
+    },
+    MuiAppBar: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          backgroundColor: theme.palette.background.paper,
+          color: theme.palette.text.primary,
+          borderBottom: `1px solid ${theme.palette.divider}`,
+        }),
+      },
+    },
+    MuiBreadcrumbs: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          fontSize: "0.875rem",
+          color: theme.palette.text.secondary,
+          "& a": {
+            color: theme.palette.text.secondary,
+            textDecoration: "none",
+            "&:hover": {
+              color: theme.palette.primary.main,
+              textDecoration: "underline",
+            },
+          },
+        }),
+        separator: ({ theme }) => ({
+          color: alpha(theme.palette.text.secondary, 0.5),
         }),
       },
     },

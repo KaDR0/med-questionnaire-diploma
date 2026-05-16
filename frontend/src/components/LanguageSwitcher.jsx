@@ -43,9 +43,11 @@ export default function LanguageSwitcher({
           ...(!fullWidth && !compact ? { minWidth: 108 } : {}),
           ...(compact ? { maxWidth: 100 } : {}),
         }}
-        SelectProps={{
-          "aria-label": t("navbar.language"),
-          MenuProps: { disableScrollLock: true },
+        slotProps={{
+          select: {
+            "aria-label": t("navbar.language"),
+            MenuProps: { disableScrollLock: true },
+          },
         }}
       >
         <MenuItem value="en">EN</MenuItem>

@@ -132,6 +132,7 @@ Notes
 This project was created for academic and demonstration purposes.
 It is not intended for real clinical diagnosis or emergency decision-making without professional validation.
 
-Author
+Authors
 
 Batyrkhan Kadyrbay
+Asylbekov Aldiyar

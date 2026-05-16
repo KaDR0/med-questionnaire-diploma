@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,8 +9,10 @@ import {
   translateRiskProblemCode,
 } from "../utils/riskFindingLabels";
 import { useAuth } from "../context/AuthContext";
+import useToast from "../utils/useToast";
 
 import {
+  Avatar,
   Box,
   Typography,
   Card,
@@ -22,10 +24,11 @@ import {
   Chip,
   Stack,
   Paper,
+  Tab,
+  Tabs,
   TextField,
   MenuItem,
   Alert,
-  Snackbar,
   Checkbox,
   FormControlLabel,
   Dialog,
@@ -38,15 +41,54 @@ import {
   ListItemText,
 } from "@mui/material";
 import { useTheme, alpha } from "@mui/material/styles";
+
+import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
+import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
+import StickyNote2RoundedIcon from "@mui/icons-material/StickyNote2Rounded";
+import EmojiEventsRoundedIcon from "@mui/icons-material/EmojiEventsRounded";
+import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import AssignmentIndRoundedIcon from "@mui/icons-material/AssignmentIndRounded";
+
 import MedicalLineChart from "../components/charts/MedicalLineChart";
 import RiskTimelineChart from "../components/charts/RiskTimelineChart";
 import PatientQuestionnaireAssignmentsCard from "../components/patient/PatientQuestionnaireAssignmentsCard";
+import KpiCard from "../components/ui/KpiCard";
+
+const TAB_KEYS = ["overview", "risks", "labs", "notes"];
+
+function initialsFromFullName(name) {
+  const s = String(name || "").trim();
+  if (!s) return "?";
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
 
 function PatientDetailPage() {
   const { id } = useParams();
   const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = TAB_KEYS.includes(searchParams.get("tab"))
+    ? searchParams.get("tab")
+    : "overview";
+  const [tab, setTab] = useState(initialTab);
+  const handleTabChange = (_event, value) => {
+    setTab(value);
+    const nextParams = new URLSearchParams(searchParams);
+    if (value === "overview") {
+      nextParams.delete("tab");
+    } else {
+      nextParams.set("tab", value);
+    }
+    setSearchParams(nextParams, { replace: true });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   const [patient, setPatient] = useState(null);
   const [assessments, setAssessments] = useState([]);
@@ -106,11 +148,7 @@ function PatientDetailPage() {
   const [doctorOrderText, setDoctorOrderText] = useState("");
   const [doctorOrderRevisions, setDoctorOrderRevisions] = useState([]);
   const [savingDoctorOrder, setSavingDoctorOrder] = useState(false);
-  const [feedback, setFeedback] = useState({
-    open: false,
-    severity: "success",
-    message: "",
-  });
+  // (legacy local Snackbar replaced by notistack via useToast/showFeedback below)
   const [intakeForm, setIntakeForm] = useState({
     chief_complaint: "",
     chronic_conditions: "",
@@ -136,9 +174,15 @@ function PatientDetailPage() {
 
   const noteCategoryOptions = ["complaints", "diagnosis", "recommendations"];
 
-  const showFeedback = (message, severity = "success") => {
-    setFeedback({ open: true, severity, message });
-  };
+  const showFeedback = useCallback(
+    (message, severity = "success") => {
+      const variant = ["success", "error", "warning", "info"].includes(severity)
+        ? severity
+        : "default";
+      toast.enqueue(message, { variant });
+    },
+    [toast]
+  );
 
   const loadPatientData = async () => {
     const query = new URLSearchParams();
@@ -702,32 +746,6 @@ function PatientDetailPage() {
       ),
     [labs]
   );
-  const quickStats = [
-    { label: t("detail.assessmentsCount"), value: assessments.length },
-    { label: t("detail.labCount"), value: labs.length },
-    { label: t("detail.notesCount"), value: notes.length },
-    {
-      label: t("detail.lastScore"),
-      value: lastAssessment ? lastAssessment.total_score : t("common.noData"),
-    },
-  ];
-  const patientAlerts = [
-    {
-      label: t("detail.status"),
-      value: getStatusLabel(patient?.status || "monitoring"),
-      color: getStatusColor(patient?.status || "monitoring"),
-    },
-    {
-      label: t("detail.nextVisit"),
-      value: nextVisitState.label,
-      color: nextVisitState.color,
-    },
-    {
-      label: t("detail.abnormalLabs"),
-      value: abnormalLabCount,
-      color: abnormalLabCount > 0 ? "warning" : "success",
-    },
-  ];
   const clinicalSummary = useMemo(() => {
     const riskFactors = [];
     let riskScore = 0;
@@ -929,142 +947,211 @@ function PatientDetailPage() {
 
   return (
     <Box sx={{ py: { xs: 1, md: 1.5 }, maxWidth: 1380, mx: "auto" }}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: { xs: 2.5, md: 3 },
-            mb: 3,
-            borderRadius: 2,
-            border: "1px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-          }}
-        >
-          <Grid container spacing={3} alignItems="flex-start">
-            <Grid item xs={12} md={8}>
-              <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: "0.06em" }}>
-                {t("detail.patientDashboard")}
-              </Typography>
-              <Typography variant="h4" sx={{ mb: 0.5 }}>
-                {patient.full_name}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
-                {t("detail.dashboardSubtitle")}
-              </Typography>
+      {/* Compact patient header */}
+      <Card sx={{ mb: 2.5 }}>
+        <CardContent sx={{ p: { xs: 2.25, md: 3 } }}>
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={2.5}
+            alignItems={{ md: "flex-start" }}
+            justifyContent="space-between"
+          >
+            <Stack direction="row" spacing={2} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
+              <Avatar
+                sx={{
+                  width: 56,
+                  height: 56,
+                  fontWeight: 800,
+                  fontSize: "1.05rem",
+                  bgcolor: alpha(theme.palette.primary.main, 0.14),
+                  color: "primary.dark",
+                  border: "1px solid",
+                  borderColor: alpha(theme.palette.primary.main, 0.22),
+                }}
+              >
+                {initialsFromFullName(patient.full_name)}
+              </Avatar>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography
+                  variant="overline"
+                  color="text.secondary"
+                  sx={{ letterSpacing: "0.08em", fontWeight: 700 }}
+                >
+                  {t("detail.patientDashboard")}
+                </Typography>
+                <Typography variant="h4" sx={{ mt: 0.25, mb: 1.25, lineHeight: 1.15 }}>
+                  {patient.full_name}
+                </Typography>
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  <Chip
+                    size="small"
+                    label={getStatusLabel(patient.status || "monitoring")}
+                    color={getStatusColor(patient.status || "monitoring")}
+                    sx={{ fontWeight: 700 }}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`${t("detail.patientId")}: ${patient.patient_code || t("common.noData")}`}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`${t("detail.age")}: ${patient.age ?? t("common.noData")}`}
+                  />
+                  <Chip size="small" variant="outlined" label={getSexLabel(patient.sex)} />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`${t("detail.nextVisit")}: ${patient.next_visit_date ? formatDateOnly(patient.next_visit_date) : t("common.noData")}`}
+                    color={nextVisitState.color === "default" ? undefined : nextVisitState.color}
+                  />
+                </Stack>
+              </Box>
+            </Stack>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1}
+              useFlexGap
+              sx={{ flexWrap: "wrap", flexShrink: 0 }}
+            >
+              <Button
+                variant="contained"
+                startIcon={<AssignmentIndRoundedIcon />}
+                component={Link}
+                to={`/patients/${patient.id}/questionnaires`}
+              >
+                {t("detail.openQuestionnaires")}
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<DownloadRoundedIcon />}
+                onClick={handleDownloadPatientPdf}
+              >
+                {t("detail.downloadPatientPdf")}
+              </Button>
+              <Button
+                variant="text"
+                startIcon={<ArrowBackRoundedIcon />}
+                component={Link}
+                to="/patients"
+                color="inherit"
+              >
+                {t("detail.backToPatients")}
+              </Button>
+            </Stack>
+          </Stack>
+        </CardContent>
+      </Card>
 
-              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", mb: 2 }}>
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  label={`${t("detail.patientId")}: ${patient.patient_code || t("common.noData")}`}
-                />
-                <Chip size="small" variant="outlined" label={`${t("detail.age")}: ${patient.age ?? t("common.noData")}`} />
-                <Chip size="small" variant="outlined" label={getSexLabel(patient.sex)} />
-                <Chip size="small" label={getStatusLabel(patient.status || "monitoring")} color={getStatusColor(patient.status || "monitoring")} />
+      {/* KPI strip */}
+      <Box
+        sx={{
+          display: "grid",
+          gap: 2.25,
+          gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+          mb: 2.5,
+        }}
+      >
+        <KpiCard
+          label={t("detail.assessmentsCount")}
+          value={assessments.length}
+          tone="primary"
+          icon={<AssignmentTurnedInRoundedIcon />}
+        />
+        <KpiCard
+          label={t("detail.labCount")}
+          value={labs.length}
+          tone="info"
+          icon={<ScienceRoundedIcon />}
+        />
+        <KpiCard
+          label={t("detail.abnormalLabs")}
+          value={abnormalLabCount}
+          tone={abnormalLabCount > 0 ? "warning" : "success"}
+          icon={<ScienceRoundedIcon />}
+          hint={abnormalLabCount > 0 ? t("dashboard.attentionNeeded") : t("dashboard.allStable")}
+          emphasised={abnormalLabCount > 0}
+        />
+        <KpiCard
+          label={t("detail.lastScore")}
+          value={lastAssessment ? lastAssessment.total_score : t("common.noData")}
+          tone={
+            lastAssessment ? getAssessmentSeverity(lastAssessment.total_score) : "info"
+          }
+          icon={<EmojiEventsRoundedIcon />}
+        />
+      </Box>
+
+      {/* Tabs */}
+      <Tabs
+        value={tab}
+        onChange={handleTabChange}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{
+          mb: 2.5,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          "& .MuiTab-root": { textTransform: "none", fontWeight: 600, minHeight: 44 },
+        }}
+      >
+        <Tab value="overview" label={t("detail.tabs.overview")} icon={<AssignmentIndRoundedIcon fontSize="small" />} iconPosition="start" />
+        <Tab value="risks" label={t("detail.tabs.risks")} icon={<EmojiEventsRoundedIcon fontSize="small" />} iconPosition="start" />
+        <Tab value="labs" label={t("detail.tabs.labs")} icon={<ScienceRoundedIcon fontSize="small" />} iconPosition="start" />
+        <Tab value="notes" label={t("detail.tabs.notes")} icon={<StickyNote2RoundedIcon fontSize="small" />} iconPosition="start" />
+      </Tabs>
+
+      {/* Clinical summary callout — shown only in Overview as a top callout */}
+      {tab === "overview" ? (
+        <Card sx={{ mb: 2.5 }}>
+          <CardContent sx={{ p: { xs: 2.25, md: 2.75 } }}>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "flex-start" }}
+              justifyContent="space-between"
+            >
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+                  {t("detail.clinicalSummary")}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {clinicalSummary.description}
+                </Typography>
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", mb: 1.5 }}>
+                  <Chip label={clinicalSummary.title} color={clinicalSummary.color} size="small" sx={{ fontWeight: 700 }} />
+                  <Chip
+                    label={t("detail.summaryScore", { score: clinicalSummary.score })}
+                    variant="outlined"
+                    size="small"
+                  />
+                </Stack>
+              </Box>
+              <Stack spacing={1} sx={{ minWidth: { md: 280 }, flexShrink: 0 }}>
+                {clinicalSummary.factors.map((factor) => (
+                  <Box
+                    key={factor}
+                    sx={{
+                      px: 1.5,
+                      py: 1,
+                      borderRadius: 1.5,
+                      bgcolor: alpha(theme.palette.primary.main, 0.04),
+                      border: "1px solid",
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Typography variant="body2">{factor}</Typography>
+                  </Box>
+                ))}
               </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      ) : null}
 
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 2.5 }}>
-                <Button variant="contained" component={Link} to={`/patients/${patient.id}/questionnaires`}>
-                  {t("detail.openQuestionnaires")}
-                </Button>
-                <Button variant="outlined" onClick={handleDownloadPatientPdf}>
-                  {t("detail.downloadPatientPdf")}
-                </Button>
-                <Button variant="text" component={Link} to="/" color="inherit">
-                  {t("detail.backToPatients")}
-                </Button>
-              </Stack>
-
-              <Grid container spacing={1.5}>
-                <Grid item xs={12} sm={6} md={4}>
-                  <Card sx={{ height: "100%", bgcolor: "grey.50", minHeight: 132 }}>
-                    <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                        {t("detail.nextVisit")}
-                      </Typography>
-                      <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
-                        {patient.next_visit_date ? formatDateOnly(patient.next_visit_date) : t("common.noData")}
-                      </Typography>
-                      <Chip label={nextVisitState.label} color={nextVisitState.color} size="small" sx={{ mt: "auto", width: "fit-content" }} />
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} sm={6} md={4}>
-                  <Card sx={{ height: "100%", bgcolor: "grey.50", minHeight: 132 }}>
-                    <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                        {t("detail.lastScore")}
-                      </Typography>
-                      <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
-                        {lastAssessment ? lastAssessment.total_score : t("common.noData")}
-                      </Typography>
-                      {lastAssessment ? (
-                        <Chip
-                          label={t(`detail.scoreStates.${getAssessmentSeverity(lastAssessment.total_score)}`)}
-                          color={getAssessmentSeverity(lastAssessment.total_score)}
-                          size="small"
-                          sx={{ mt: "auto", width: "fit-content" }}
-                        />
-                      ) : null}
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Card sx={{ height: "100%", bgcolor: "grey.50", minHeight: 132 }}>
-                    <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                        {t("detail.abnormalLabs")}
-                      </Typography>
-                      <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
-                        {abnormalLabCount}
-                      </Typography>
-                      <Chip label={clinicalSummary.title} color={clinicalSummary.color} size="small" sx={{ mt: "auto", width: "fit-content" }} />
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-            </Grid>
-
-            <Grid item xs={12} md={4}>
-              <Card sx={{ height: "100%", bgcolor: "grey.50" }}>
-                <CardContent sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
-                    {t("detail.clinicalSummary")}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {clinicalSummary.description}
-                  </Typography>
-                  <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", mb: 2 }}>
-                    <Chip label={clinicalSummary.title} color={clinicalSummary.color} size="small" />
-                    <Chip
-                      label={t("detail.summaryScore", { score: clinicalSummary.score })}
-                      variant="outlined"
-                      size="small"
-                    />
-                  </Stack>
-                  <Stack spacing={1} sx={{ flex: 1 }}>
-                    {clinicalSummary.factors.map((factor) => (
-                      <Box
-                        key={factor}
-                        sx={{
-                          p: 1.25,
-                          borderRadius: 1,
-                          bgcolor: "background.paper",
-                          border: "1px solid",
-                          borderColor: "divider",
-                        }}
-                      >
-                        <Typography variant="body2">{factor}</Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-        </Paper>
-
-        {recommendationBundle ? (
+        {tab === "risks" && recommendationBundle ? (
           <Paper sx={{ p: 2.5, mb: 2.5, borderRadius: 3 }}>
             <Typography variant="h6" gutterBottom>
               {t("detail.integratedRecTitle")}
@@ -1116,60 +1203,9 @@ function PatientDetailPage() {
           </Paper>
         ) : null}
 
-        <Grid container spacing={2.5}>
-          <Grid item xs={12} sm={6} lg={3}>
-            <Card sx={{ borderRadius: 4, boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                  {quickStats[0].label}
-                </Typography>
-                <Typography variant="h5" fontWeight={700}>
-                  {quickStats[0].value}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} lg={3}>
-            <Card sx={{ borderRadius: 4, boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                  {quickStats[1].label}
-                </Typography>
-                <Typography variant="h5" fontWeight={700}>
-                  {quickStats[1].value}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} lg={3}>
-            <Card sx={{ borderRadius: 4, boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                  {quickStats[2].label}
-                </Typography>
-                <Typography variant="h5" fontWeight={700}>
-                  {quickStats[2].value}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} lg={3}>
-            <Card sx={{ borderRadius: 4, boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                  {quickStats[3].label}
-                </Typography>
-                <Typography variant="h5" fontWeight={700}>
-                  {quickStats[3].value}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
-
-        <Grid container spacing={2.5} sx={{ mt: 0.25 }}>
-          <Grid item xs={12}>
-            <Stack spacing={3}>
+        <Stack spacing={3}>
+              {tab === "overview" ? (
+                <>
               <Card sx={{ borderRadius: 3.5 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h6" gutterBottom>
@@ -1228,7 +1264,6 @@ function PatientDetailPage() {
                       size="small"
                       value={statusForm.next_visit_date}
                       onChange={(event) => handlePatientFieldChange("next_visit_date", event.target.value)}
-                      InputLabelProps={{ shrink: true }}
                       slotProps={{ inputLabel: { shrink: true } }}
                       sx={{
                         "& .MuiInputBase-input": { pt: 1.35 },
@@ -1355,8 +1390,10 @@ function PatientDetailPage() {
                               <ListItemText
                                 primary={formatDate(rev.created_at)}
                                 secondary={doctorOrderSnippet(rev.order_text)}
-                                primaryTypographyProps={{ variant: "body2", fontWeight: 600 }}
-                                secondaryTypographyProps={{ variant: "caption", sx: { whiteSpace: "normal" } }}
+                                slotProps={{
+                                  primary: { variant: "body2", fontWeight: 600 },
+                                  secondary: { variant: "caption", sx: { whiteSpace: "normal" } },
+                                }}
                               />
                             </ListItemButton>
                           ))}
@@ -1406,14 +1443,6 @@ function PatientDetailPage() {
                 </CardContent>
               </Card>
 
-              <Button color="error" variant="text" fullWidth onClick={handleDeletePatient}>
-                {t("detail.deletePatient")}
-              </Button>
-            </Stack>
-          </Grid>
-
-          <Grid item xs={12}>
-            <Stack spacing={3}>
               <Card sx={{ borderRadius: 4 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h5" gutterBottom>
@@ -1517,7 +1546,11 @@ function PatientDetailPage() {
                   </CardContent>
                 </Card>
               ) : null}
+                </>
+              ) : null}
 
+              {tab === "notes" ? (
+                <>
               <Card sx={{ borderRadius: 3.5 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h5" gutterBottom>
@@ -1530,7 +1563,7 @@ function PatientDetailPage() {
                   ) : (
                     <>
                       <Grid container spacing={2} sx={{ mb: 2 }}>
-                        <Grid item xs={12} md={4}>
+                        <Grid size={{ xs: 12, md: 4 }}>
                           <Card variant="outlined" sx={{ borderRadius: 4 }}>
                             <CardContent>
                               <Typography variant="body2" color="text.secondary">
@@ -1540,7 +1573,7 @@ function PatientDetailPage() {
                             </CardContent>
                           </Card>
                         </Grid>
-                        <Grid item xs={12} md={4}>
+                        <Grid size={{ xs: 12, md: 4 }}>
                           <Card variant="outlined" sx={{ borderRadius: 4 }}>
                             <CardContent>
                               <Typography variant="body2" color="text.secondary">
@@ -1550,7 +1583,7 @@ function PatientDetailPage() {
                             </CardContent>
                           </Card>
                         </Grid>
-                        <Grid item xs={12} md={4}>
+                        <Grid size={{ xs: 12, md: 4 }}>
                           <Card variant="outlined" sx={{ borderRadius: 4 }}>
                             <CardContent>
                               <Typography variant="body2" color="text.secondary">
@@ -1637,7 +1670,7 @@ function PatientDetailPage() {
                               ) : (
                                 <Grid container spacing={2}>
                                   {assessments.map((assessment) => (
-                                    <Grid item xs={12} md={6} key={assessment.id}>
+                                    <Grid size={{ xs: 12, md: 6 }} key={assessment.id}>
                                       <Card variant="outlined" sx={{ borderRadius: 3 }}>
                                         <CardContent>
                                           <Stack
@@ -1700,7 +1733,11 @@ function PatientDetailPage() {
                   )}
                 </CardContent>
               </Card>
+                </>
+              ) : null}
 
+              {tab === "risks" ? (
+                <>
               <Card sx={{ borderRadius: 4 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h5" gutterBottom>
@@ -1915,7 +1952,11 @@ function PatientDetailPage() {
                   )}
                 </CardContent>
               </Card>
+                </>
+              ) : null}
 
+              {tab === "labs" ? (
+                <>
               <Card sx={{ borderRadius: 4 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h5" gutterBottom>
@@ -1924,7 +1965,7 @@ function PatientDetailPage() {
                   <Divider sx={{ mb: 2 }} />
 
                   <Grid container spacing={2} sx={{ mb: 3 }}>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <TextField
                         select
                         fullWidth
@@ -1937,7 +1978,7 @@ function PatientDetailPage() {
                         <MenuItem value="month">{t("detail.labPeriods.month")}</MenuItem>
                       </TextField>
                     </Grid>
-                    <Grid item xs={12} md={8}>
+                    <Grid size={{ xs: 12, md: 8 }}>
                       <TextField
                         select
                         fullWidth
@@ -1966,7 +2007,7 @@ function PatientDetailPage() {
                       ) : (
                         <>
                           <Grid container spacing={2} sx={{ mb: 2 }}>
-                            <Grid item xs={12} md={4}>
+                            <Grid size={{ xs: 12, md: 4 }}>
                               <Card variant="outlined" sx={{ borderRadius: 4 }}>
                                 <CardContent>
                                   <Typography variant="body2" color="text.secondary">
@@ -1976,7 +2017,7 @@ function PatientDetailPage() {
                                 </CardContent>
                               </Card>
                             </Grid>
-                            <Grid item xs={12} md={4}>
+                            <Grid size={{ xs: 12, md: 4 }}>
                               <Card variant="outlined" sx={{ borderRadius: 4 }}>
                                 <CardContent>
                                   <Typography variant="body2" color="text.secondary">
@@ -1988,7 +2029,7 @@ function PatientDetailPage() {
                                 </CardContent>
                               </Card>
                             </Grid>
-                            <Grid item xs={12} md={4}>
+                            <Grid size={{ xs: 12, md: 4 }}>
                               <Card variant="outlined" sx={{ borderRadius: 4 }}>
                                 <CardContent>
                                   <Typography variant="body2" color="text.secondary">
@@ -2067,7 +2108,7 @@ function PatientDetailPage() {
                   ) : (
                     <Grid container spacing={2}>
                       {labs.map((lab) => (
-                        <Grid item xs={12} key={lab.id}>
+                        <Grid size={{ xs: 12 }} key={lab.id}>
                           <Card
                             variant="outlined"
                             sx={{
@@ -2203,7 +2244,11 @@ function PatientDetailPage() {
                   )}
                 </CardContent>
               </Card>
+                </>
+              ) : null}
 
+              {tab === "notes" ? (
+                <>
               <Card sx={{ borderRadius: 4 }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h5" gutterBottom>
@@ -2273,7 +2318,7 @@ function PatientDetailPage() {
                   ) : (
                     <Grid container spacing={2}>
                       {regularNotes.map((note) => (
-                        <Grid item xs={12} key={note.id}>
+                        <Grid size={{ xs: 12 }} key={note.id}>
                           <Card
                             variant="outlined"
                             sx={{
@@ -2354,7 +2399,7 @@ function PatientDetailPage() {
                   ) : (
                     <Grid container spacing={2}>
                       {excelEntries.map(([key, value]) => (
-                        <Grid item xs={12} md={6} key={key}>
+                        <Grid size={{ xs: 12, md: 6 }} key={key}>
                           <Card variant="outlined" sx={{ borderRadius: 3 }}>
                             <CardContent>
                               <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
@@ -2373,9 +2418,17 @@ function PatientDetailPage() {
                   )}
                 </CardContent>
               </Card>
+                </>
+              ) : null}
+
+              {tab === "overview" ? (
+                <Box sx={{ mt: 1 }}>
+                  <Button color="error" variant="text" fullWidth onClick={handleDeletePatient}>
+                    {t("detail.deletePatient")}
+                  </Button>
+                </Box>
+              ) : null}
             </Stack>
-          </Grid>
-        </Grid>
 
       <Dialog
         open={Boolean(editingLabResultId)}
@@ -2399,7 +2452,7 @@ function PatientDetailPage() {
                   date: event.target.value,
                 }))
               }
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
 
             {labEditForm.values.map((value) => (
@@ -2467,21 +2520,6 @@ function PatientDetailPage() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      <Snackbar
-        open={feedback.open}
-        autoHideDuration={2500}
-        onClose={() => setFeedback((prev) => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert
-          severity={feedback.severity}
-          sx={{ width: "100%" }}
-          onClose={() => setFeedback((prev) => ({ ...prev, open: false }))}
-        >
-          {feedback.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }

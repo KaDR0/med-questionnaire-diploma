@@ -4,7 +4,7 @@
 - `python manage.py makemigrations`
 - `python manage.py migrate`
 - `python manage.py check`
-- Run backend: `python manage.py runserver`
+- Run backend: `python3 manage.py runserver`
 
 ## Frontend checks
 - `npm install`

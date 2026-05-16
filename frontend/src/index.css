@@ -29,18 +29,10 @@ body {
 .mq-workspace-bg {
   position: relative;
   isolation: isolate;
-  background-color: #e8f0f3;
+  background-color: #f5f7fa;
   background-image:
-    radial-gradient(1000px 420px at 92% 0%, rgba(11, 92, 109, 0.085) 0%, transparent 58%),
-    radial-gradient(780px 360px at 0% 100%, rgba(10, 125, 148, 0.065) 0%, transparent 52%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 36%),
-    repeating-linear-gradient(
-      -12deg,
-      transparent,
-      transparent 14px,
-      rgba(11, 92, 109, 0.02) 14px,
-      rgba(11, 92, 109, 0.02) 15px
-    );
+    radial-gradient(1100px 420px at 96% -10%, rgba(11, 92, 109, 0.05) 0%, transparent 60%),
+    radial-gradient(820px 360px at -10% 110%, rgba(10, 125, 148, 0.04) 0%, transparent 55%);
   background-attachment: local;
 }
 
